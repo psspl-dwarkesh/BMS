@@ -1,10 +1,13 @@
-import { useState, useRef, useMemo } from 'react';
+import { useState, useRef, useMemo, useEffect } from 'react';
+import { useParams } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
 } from 'recharts';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { OrbitControls, Html } from '@react-three/drei';
 import { HelpCircle, TrendingDown, TrendingUp, Gauge, Thermometer } from 'lucide-react';
+import { telemetryApi } from '../api/endpoints';
 
 function BatteryCell3D({ position, voltage, avg, name }) {
   const meshRef = useRef();
@@ -19,7 +22,7 @@ function BatteryCell3D({ position, voltage, avg, name }) {
 
   // Subtle breathing animation for all cells, aggressive for critical
   useFrame((state) => {
-    if (voltage < avg - 0.1) {
+    if (meshRef.current && voltage < avg - 0.1) {
       meshRef.current.scale.y = 1 + Math.sin(state.clock.elapsedTime * 5) * 0.1;
       meshRef.current.material.emissiveIntensity = 0.5 + Math.sin(state.clock.elapsedTime * 5) * 0.5;
     }
@@ -66,9 +69,6 @@ function BatteryCell3D({ position, voltage, avg, name }) {
 }
 
 function BatteryPackModel({ cellData, avg }) {
-  // Layout cells in as square a grid as the real cell count allows - this is
-  // whatever number of Cell*_Voltage columns the CSV actually provided, not
-  // a fixed 96.
   const cells = [];
   const cols = Math.max(1, Math.ceil(Math.sqrt(cellData.length * 1.5)));
   const rows = Math.max(1, Math.ceil(cellData.length / cols));
@@ -86,9 +86,9 @@ function BatteryPackModel({ cellData, avg }) {
       <BatteryCell3D
         key={i}
         position={[x, 0, z]}
-        voltage={cellData[i].voltage}
+        voltage={cellData[i].voltage_mv / 1000}
         avg={avg}
-        name={cellData[i].name}
+        name={`Cell ${cellData[i].cell_number}`}
       />
     );
   }
@@ -105,89 +105,48 @@ function BatteryPackModel({ cellData, avg }) {
   );
 }
 
-export default function CellAnalysis({ data }) {
-  const hasCellData = !!data?.signalsAvailable?.cellVoltage;
-  const hasCellTempData = !!data?.signalsAvailable?.cellTemperature;
-  const pack = data?.kpis?.pack;
+export default function CellAnalysis() {
+  const { id } = useParams();
 
-  // Real per-cell average voltage, computed directly from the CSV's own
-  // Cell*_Voltage columns across every active row. Nothing here is randomized
-  // or backfilled - if the CSV has no per-cell columns, cellData stays empty
-  // and the pack viewer / chart are replaced with an explicit empty state.
-  const cellData = useMemo(() => {
-    if (!hasCellData) return [];
-    const rows = (data.datasets || [])
-      .filter(d => d.active !== false)
-      .flatMap(d => d.data || []);
-    if (rows.length === 0) return [];
+  const { data: latest, isLoading } = useQuery({
+    queryKey: ['telemetry-latest-cells', id],
+    queryFn: () => telemetryApi.getLatest(id),
+    refetchInterval: 1000,
+    enabled: !!id
+  });
 
-    const headers = Object.keys(rows[0]);
-    const cellVoltageCols = headers.filter(k => k.toLowerCase().includes('cell') && k.toLowerCase().includes('voltage'));
-    if (cellVoltageCols.length === 0) return [];
+  if (isLoading) {
+    return <div className="p-8 text-center">Loading cell data...</div>;
+  }
 
-    return cellVoltageCols
-      .map((col, i) => {
-        let total = 0, samples = 0;
-        rows.forEach(row => {
-          const val = parseFloat(row[col]);
-          if (!isNaN(val)) { total += val; samples++; }
-        });
-        const numMatch = col.match(/\d+/);
-        return {
-          name: numMatch ? `C${numMatch[0]}` : col,
-          voltage: samples > 0 ? total / samples : null
-        };
-      })
-      .filter(c => c.voltage !== null);
-  }, [data, hasCellData]);
-
-  const avg = cellData.length > 0
-    ? cellData.reduce((sum, c) => sum + c.voltage, 0) / cellData.length
-    : null;
-
-  // Real per-cell average temperature, computed the same way as cellData -
-  // only from actual Cell*_Temp columns, empty when the CSV has none.
-  const cellTempData = useMemo(() => {
-    if (!hasCellTempData) return [];
-    const rows = (data.datasets || [])
-      .filter(d => d.active !== false)
-      .flatMap(d => d.data || []);
-    if (rows.length === 0) return [];
-
-    const headers = Object.keys(rows[0]);
-    const cellTempCols = headers.filter(k => k.toLowerCase().includes('cell') && k.toLowerCase().includes('temp'));
-    if (cellTempCols.length === 0) return [];
-
-    return cellTempCols
-      .map((col) => {
-        let total = 0, samples = 0;
-        rows.forEach(row => {
-          const val = parseFloat(row[col]);
-          if (!isNaN(val)) { total += val; samples++; }
-        });
-        const numMatch = col.match(/\d+/);
-        return {
-          name: numMatch ? `C${numMatch[0]}` : col,
-          temperature: samples > 0 ? total / samples : null
-        };
-      })
-      .filter(c => c.temperature !== null);
-  }, [data, hasCellTempData]);
-
-  if (cellData.length === 0) {
+  const cellData = latest?.cell_readings || [];
+  const hasCellData = cellData.length > 0;
+  
+  if (!hasCellData) {
     return (
       <div className="animate-fade-in">
         <div className="card" style={{ textAlign: 'center', padding: '4rem 2rem', color: 'var(--text-muted)' }}>
           <HelpCircle size={48} style={{ opacity: 0.2, margin: '0 auto 1rem' }} />
-          <p style={{ fontWeight: 600, color: 'var(--text-primary)', marginBottom: '0.5rem' }}>No per-cell voltage data in this CSV</p>
+          <p style={{ fontWeight: 600, color: 'var(--text-primary)', marginBottom: '0.5rem' }}>No per-cell data</p>
           <p style={{ maxWidth: '480px', margin: '0 auto' }}>
-            This dataset has no Cell*_Voltage columns, so per-cell imbalance can't be computed or shown.
-            Pack-level voltage is still available on the Dashboard tab — no cell readings are simulated in their place.
+            This device has no active per-cell voltage or temperature telemetry.
           </p>
         </div>
       </div>
     );
   }
+
+  const avg = latest.avg_cell_voltage;
+  const weakestCell = cellData.reduce((prev, current) => (prev.voltage_mv < current.voltage_mv) ? prev : current);
+  const strongestCell = cellData.reduce((prev, current) => (prev.voltage_mv > current.voltage_mv) ? prev : current);
+  const maxTempSpread = latest.max_thermistor_temp - latest.min_thermistor_temp;
+
+  // Format data for bar charts
+  const barData = cellData.map(c => ({
+    name: `C${c.cell_number}`,
+    voltage: c.voltage_mv / 1000,
+    temperature: c.temperature_c
+  }));
 
   return (
     <div className="animate-fade-in">
@@ -195,25 +154,21 @@ export default function CellAnalysis({ data }) {
       <div className="dashboard-grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)', marginBottom: '1.5rem' }}>
         <div className="card">
           <div className="stat-label"><TrendingDown size={14} color="var(--danger)" /> Weakest Cell</div>
-          <div className="stat-value">
-            {pack?.weakestCell ? pack.weakestCell.name : 'N/A'}
-          </div>
-          <div className="stat-detail">{pack?.weakestCell ? `Avg ${pack.weakestCell.avgVoltage.toFixed(3)}V` : 'No cell data'}</div>
+          <div className="stat-value">Cell {weakestCell.cell_number}</div>
+          <div className="stat-detail">Live: {(weakestCell.voltage_mv / 1000).toFixed(3)}V</div>
         </div>
         <div className="card">
           <div className="stat-label"><TrendingUp size={14} color="var(--success)" /> Strongest Cell</div>
-          <div className="stat-value">
-            {pack?.strongestCell ? pack.strongestCell.name : 'N/A'}
-          </div>
-          <div className="stat-detail">{pack?.strongestCell ? `Avg ${pack.strongestCell.avgVoltage.toFixed(3)}V` : 'No cell data'}</div>
+          <div className="stat-value">Cell {strongestCell.cell_number}</div>
+          <div className="stat-detail">Live: {(strongestCell.voltage_mv / 1000).toFixed(3)}V</div>
         </div>
         <div className="card">
           <div className="stat-label"><Gauge size={14} color="var(--warning)" /> Peak Voltage Spread</div>
           <div className="stat-value">
-            {pack?.maxCellVoltageSpread !== null && pack?.maxCellVoltageSpread !== undefined ? (pack.maxCellVoltageSpread * 1000).toFixed(0) : 'N/A'}
-            {pack?.maxCellVoltageSpread !== null && pack?.maxCellVoltageSpread !== undefined && <span className="stat-unit">mV</span>}
+            {((strongestCell.voltage_mv - weakestCell.voltage_mv)).toFixed(0)}
+            <span className="stat-unit">mV</span>
           </div>
-          <div className="stat-detail">Imbalance threshold: 100mV</div>
+          <div className="stat-detail">Live difference between max and min</div>
         </div>
       </div>
 
@@ -222,7 +177,7 @@ export default function CellAnalysis({ data }) {
         <div className="card-header" style={{ padding: '1.25rem' }}>
           <div>
             <div className="card-title">Interactive 3D Physical Pack Model</div>
-            <div className="card-subtitle">WebGL spatial visualization of {cellData.length} measured cells — Click and drag to rotate, hover for diagnostics</div>
+            <div className="card-subtitle">WebGL spatial visualization of {cellData.length} measured cells — Live view</div>
           </div>
           <div style={{ display: 'flex', gap: '1rem', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
             <span style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}><div style={{ width: '10px', height: '10px', borderRadius: '2px', background: '#22c55e' }} /> Normal</span>
@@ -255,7 +210,7 @@ export default function CellAnalysis({ data }) {
         <div className="card-title" style={{ marginBottom: '1rem' }}>Cell Voltage Distribution (Bar)</div>
         <div style={{ flex: 1, minHeight: 0 }}>
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={cellData}>
+            <BarChart data={barData}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border-light)" vertical={false} />
               <XAxis dataKey="name" stroke="var(--text-muted)" tick={{ fontSize: 9 }} interval={3} />
               <YAxis stroke="var(--text-muted)" domain={['dataMin - 0.05', 'dataMax + 0.05']} tick={{ fontSize: 11 }} tickFormatter={(val) => val.toFixed(3)} width={60} />
@@ -264,7 +219,7 @@ export default function CellAnalysis({ data }) {
                 itemStyle={{ color: 'var(--text-primary)', fontWeight: '600' }}
                 formatter={(value) => [value.toFixed(3) + 'V', 'Voltage']}
               />
-              <Bar dataKey="voltage" fill="var(--text-primary)" radius={[2, 2, 0, 0]} />
+              <Bar dataKey="voltage" fill="var(--text-primary)" radius={[2, 2, 0, 0]} isAnimationActive={false} />
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -276,39 +231,29 @@ export default function CellAnalysis({ data }) {
           <div>
             <div className="card-title">Cell Temperature Distribution</div>
             <div className="card-subtitle">
-              {hasCellTempData
-                ? `Average temperature per cell across ${cellTempData.length} sensors`
-                : 'No per-cell temperature columns in this CSV'}
+              Live temperature per cell across {cellData.length} sensors
             </div>
           </div>
-          {hasCellTempData && pack?.maxCellTempSpread !== null && pack?.maxCellTempSpread !== undefined && (
-            <span className={`badge ${pack.maxCellTempSpread > 8 ? 'badge-danger' : 'badge-success'}`}>
-              <Thermometer size={12} style={{ marginRight: '0.25rem' }} />
-              Peak Δ {pack.maxCellTempSpread.toFixed(1)}°C
-            </span>
-          )}
+          <span className={`badge ${maxTempSpread > 8 ? 'badge-danger' : 'badge-success'}`}>
+            <Thermometer size={12} style={{ marginRight: '0.25rem' }} />
+            Peak Δ {maxTempSpread.toFixed(1)}°C
+          </span>
         </div>
-        {hasCellTempData && cellTempData.length > 0 ? (
-          <div style={{ flex: 1, minHeight: 0 }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={cellTempData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--border-light)" vertical={false} />
-                <XAxis dataKey="name" stroke="var(--text-muted)" tick={{ fontSize: 9 }} interval={3} />
-                <YAxis stroke="var(--text-muted)" domain={['dataMin - 1', 'dataMax + 1']} tick={{ fontSize: 11 }} width={50} tickFormatter={(val) => val.toFixed(1)} />
-                <Tooltip
-                  contentStyle={{ background: '#fff', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)', boxShadow: 'var(--shadow-md)', fontSize: '0.8rem' }}
-                  itemStyle={{ color: 'var(--text-primary)', fontWeight: '600' }}
-                  formatter={(value) => [value.toFixed(1) + '°C', 'Temperature']}
-                />
-                <Bar dataKey="temperature" fill="var(--danger)" radius={[2, 2, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        ) : (
-          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: '0.85rem', textAlign: 'center', padding: '1rem' }}>
-            Add Cell1_Temp, Cell2_Temp, etc. columns to your CSV to see per-cell thermal distribution and cell-to-cell temperature difference.
-          </div>
-        )}
+        <div style={{ flex: 1, minHeight: 0 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={barData}>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border-light)" vertical={false} />
+              <XAxis dataKey="name" stroke="var(--text-muted)" tick={{ fontSize: 9 }} interval={3} />
+              <YAxis stroke="var(--text-muted)" domain={['dataMin - 1', 'dataMax + 1']} tick={{ fontSize: 11 }} width={50} tickFormatter={(val) => val.toFixed(1)} />
+              <Tooltip
+                contentStyle={{ background: '#fff', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)', boxShadow: 'var(--shadow-md)', fontSize: '0.8rem' }}
+                itemStyle={{ color: 'var(--text-primary)', fontWeight: '600' }}
+                formatter={(value) => [value.toFixed(1) + '°C', 'Temperature']}
+              />
+              <Bar dataKey="temperature" fill="var(--danger)" radius={[2, 2, 0, 0]} isAnimationActive={false} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
       </div>
     </div>
   );
