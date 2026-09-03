@@ -46,6 +46,16 @@ def gen_ev_pack(filename, anomaly=False):
     rows = []
     soc = 92.0
     weak_cell = 7 if anomaly else None
+    # Anomaly dataset runs the discharge phase down further and only
+    # partially recharges (backend alerting - see check_telemetry_thresholds
+    # in ingestion.py - only evaluates a CSV import's *most recent* row,
+    # same as a live device's current state; a dataset that fully recharges
+    # by its last row would show no low-SOC condition "right now" even
+    # though it dipped low mid-drive). Ending below the 15% threshold makes
+    # a real low_soc Alert row genuinely demonstrable end to end, not just a
+    # client-side chart annotation.
+    soc_floor = 8.0 if anomaly else 18.0
+    soc_charge_cap = 13.0 if anomaly else 97.0
     fieldnames = (
         ["Timestamp", "Pack_Voltage", "Pack_Current", "SOC", "SOH"]
         + [f"Cell{i}_Voltage" for i in range(1, CELL_COUNT + 1)]
@@ -58,10 +68,10 @@ def gen_ev_pack(filename, anomaly=False):
         # Current profile: noisy drive-cycle discharge, then a steady charge taper.
         if discharging:
             current = -(40 + 25 * abs(math.sin(m / 12)) + rng.uniform(-4, 4))
-            soc = max(18, soc - 0.5 - rng.uniform(0, 0.15))
+            soc = max(soc_floor, soc - 0.5 - rng.uniform(0, 0.15))
         else:
             current = 22 * (1 - (soc / 100) * 0.4) + rng.uniform(-1.5, 1.5)
-            soc = min(97, soc + 0.55 + rng.uniform(0, 0.1))
+            soc = min(soc_charge_cap, soc + 0.55 + rng.uniform(0, 0.1))
 
         ocv_cell = ocv_from_soc(soc)
         pack_voltage = ocv_cell * CELL_COUNT - current * 0.02 + rng.gauss(0, 0.3)

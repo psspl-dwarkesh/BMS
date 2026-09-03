@@ -8,7 +8,10 @@ import Select from './common/Select';
 
 export default function AlertsPage() {
   const { id } = useParams(); // undefined if fleet scope
-  const [statusFilter, setStatusFilter] = useState('active');
+  // 'open' matches backend/routers/alerts.py's status filter values exactly
+  // (open|resolved|acknowledged) - it previously said 'active', which the
+  // backend doesn't recognize, so "Active Only" silently returned everything.
+  const [statusFilter, setStatusFilter] = useState('open');
   const [severityFilter, setSeverityFilter] = useState('all');
   const queryClient = useQueryClient();
 
@@ -56,7 +59,7 @@ export default function AlertsPage() {
               value={statusFilter}
               onChange={setStatusFilter}
               options={[
-                { value: 'active', label: 'Active Only' },
+                { value: 'open', label: 'Active Only' },
                 { value: 'resolved', label: 'Resolved' },
                 { value: 'all', label: 'All Statuses' },
               ]}
@@ -104,53 +107,67 @@ export default function AlertsPage() {
                 </tr>
               </thead>
               <tbody>
-                {alerts.map((alert, idx) => (
-                  <tr key={alert.id} style={{ borderBottom: '1px solid var(--border-light)', background: idx % 2 === 0 ? 'transparent' : 'var(--bg-secondary)' }}>
-                    <td style={{ padding: '1rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                        <Calendar size={12} />
-                        {new Date(alert.triggered_at).toLocaleString()}
-                      </div>
-                    </td>
-                    {!id && (
-                      <td style={{ padding: '1rem', fontWeight: 500 }}>
-                        Dev {alert.device_id}
+                {alerts.map((alert, idx) => {
+                  // The backend's Alert doesn't have a single "status" field -
+                  // it's derived from resolved_at (see backend/routers/alerts.py's
+                  // _alert_to_dict): open, or resolved once the condition clears.
+                  // Acknowledgement is a separate, independent timestamp - an
+                  // alert can be both acknowledged and still open.
+                  const isResolved = !!alert.resolved_at;
+                  const isAcknowledged = !!alert.acknowledged_at;
+                  return (
+                    <tr key={alert.id} style={{ borderBottom: '1px solid var(--border-light)', background: idx % 2 === 0 ? 'transparent' : 'var(--bg-secondary)' }}>
+                      <td style={{ padding: '1rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                          <Calendar size={12} />
+                          {new Date(alert.triggered_at).toLocaleString()}
+                        </div>
                       </td>
-                    )}
-                    <td style={{ padding: '1rem' }}>
-                      <span className={`badge badge-${alert.severity === 'critical' ? 'danger' : 'warning'}`}>
-                        {alert.severity}
-                      </span>
-                    </td>
-                    <td style={{ padding: '1rem', fontWeight: 500, textTransform: 'capitalize' }}>
-                      {alert.alert_type.replace('_', ' ')}
-                    </td>
-                    <td style={{ padding: '1rem', color: 'var(--text-secondary)' }}>
-                      {alert.message}
-                    </td>
-                    <td style={{ padding: '1rem' }}>
-                      <span className={`badge badge-${alert.status === 'active' ? 'danger' : 'success'}`}>
-                        {alert.status}
-                      </span>
-                    </td>
-                    <td style={{ padding: '1rem', textAlign: 'center' }}>
-                      {alert.status === 'active' ? (
-                        <button 
-                          className="btn-secondary" 
-                          style={{ padding: '0.3rem 0.6rem', fontSize: '0.75rem' }}
-                          onClick={() => ackMutation.mutate(alert.id)}
-                          disabled={ackMutation.isLoading}
-                        >
-                          Acknowledge
-                        </button>
-                      ) : (
-                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                          {alert.resolved_at ? new Date(alert.resolved_at).toLocaleString() : 'Done'}
-                        </span>
+                      {!id && (
+                        <td style={{ padding: '1rem', fontWeight: 500 }}>
+                          {alert.device_name || `Dev ${alert.device_id}`}
+                        </td>
                       )}
-                    </td>
-                  </tr>
-                ))}
+                      <td style={{ padding: '1rem' }}>
+                        <span className={`badge badge-${alert.severity === 'critical' ? 'danger' : 'warning'}`}>
+                          {alert.severity}
+                        </span>
+                      </td>
+                      <td style={{ padding: '1rem', fontWeight: 500, textTransform: 'capitalize' }}>
+                        {alert.type.replace(/_/g, ' ')}
+                      </td>
+                      <td style={{ padding: '1rem', color: 'var(--text-secondary)' }}>
+                        {alert.message}
+                      </td>
+                      <td style={{ padding: '1rem' }}>
+                        <span className={`badge badge-${isResolved ? 'success' : 'danger'}`}>
+                          {isResolved ? 'Resolved' : 'Active'}
+                        </span>
+                        {!isResolved && isAcknowledged && (
+                          <span className="badge badge-neutral" style={{ marginLeft: '0.4rem' }}>Acknowledged</span>
+                        )}
+                      </td>
+                      <td style={{ padding: '1rem', textAlign: 'center' }}>
+                        {isResolved ? (
+                          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                            {new Date(alert.resolved_at).toLocaleString()}
+                          </span>
+                        ) : isAcknowledged ? (
+                          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Acknowledged</span>
+                        ) : (
+                          <button
+                            className="btn-secondary"
+                            style={{ padding: '0.3rem 0.6rem', fontSize: '0.75rem' }}
+                            onClick={() => ackMutation.mutate(alert.id)}
+                            disabled={ackMutation.isLoading}
+                          >
+                            Acknowledge
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

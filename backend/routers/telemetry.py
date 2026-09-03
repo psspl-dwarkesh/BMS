@@ -11,6 +11,7 @@ import pandas as pd
 from database import get_db
 from models import CellReading, Device, Telemetry, TelemetrySource, User
 from routers import get_current_user, get_scoped_device, require_admin
+from ingestion import check_telemetry_thresholds
 from ws_manager import manager
 
 router = APIRouter(prefix="/api/v1/devices/{device_id}/telemetry", tags=["telemetry"])
@@ -231,6 +232,7 @@ def _process_import_in_background(device_id: int, df_json: str):
         BATCH_SIZE = 200
         pending: list[tuple[Telemetry, list[dict]]] = []
         rows_written = 0
+        latest = None  # (Telemetry, fields, sample_time, cell_readings_data) for the most-recent row seen
 
         def flush_batch():
             nonlocal rows_written
@@ -313,11 +315,26 @@ def _process_import_in_background(device_id: int, df_json: str):
                 **fields,
             )
             pending.append((trow, cell_readings_data))
+            if latest is None or sample_time >= latest[2]:
+                latest = (trow, fields, sample_time, cell_readings_data)
             if len(pending) >= BATCH_SIZE:
                 flush_batch()
 
         flush_batch()  # final partial batch
         device.last_seen_at = datetime.datetime.utcnow()
+
+        # Real-time alerting doesn't apply to the historical rows (see
+        # flush_batch above), but the device's *current* state - its most
+        # recent row - should still surface real alerts, same as if this
+        # were a live device: e.g. a battery imported at 12% SOC should show
+        # up as a genuine low-SOC alert, not just a client-side chart
+        # annotation. `latest` tracks the max-sample_time row seen (CSV rows
+        # aren't guaranteed to already be in chronological order), and by
+        # this point flush_batch() has given it a real trow.id.
+        if latest is not None:
+            latest_trow, latest_fields, _, latest_cells = latest
+            check_telemetry_thresholds(db, device.id, latest_trow.id, latest_fields, latest_cells)
+
         db.commit()
         print(f"CSV import for device {device_id}: {rows_written} rows written.")
 
