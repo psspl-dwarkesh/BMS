@@ -15,7 +15,17 @@ export function useLiveSocket() {
     if (!user) return;
     
     const token = localStorage.getItem('bms_token');
-    const wsUrl = `${import.meta.env.VITE_API_BASE_URL?.replace('http', 'ws') || 'ws://localhost:8000'}/ws/alerts?token=${token}`;
+    
+    let baseWsUrl;
+    if (import.meta.env.VITE_API_BASE_URL) {
+      baseWsUrl = import.meta.env.VITE_API_BASE_URL.replace('http', 'ws');
+    } else if (import.meta.env.DEV) {
+      baseWsUrl = 'ws://localhost:8000';
+    } else {
+      baseWsUrl = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}`;
+    }
+    
+    const wsUrl = `${baseWsUrl}/ws/alerts?token=${token}`;
     
     const ws = new WebSocket(wsUrl);
     

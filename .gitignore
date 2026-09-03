@@ -1,12 +1,27 @@
+# Python
 __pycache__/
 *.pyc
+*.pyo
+.venv/
+venv/
+backend/venv/
+
+# SQLite
 *.db
 *.db-wal
 *.db-shm
 *.db-journal
-.env
-venv/
-backend/venv/
+backend/bms_analytics.db
+
+# Node / Vite
 node_modules/
 dist/
+bms-portal/dist/
+bms-portal/.vite/
+
+# Config
+.env
+
+# Editor / OS
 .DS_Store
+Thumbs.db
