@@ -1,7 +1,19 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Mail, Lock, ArrowRight, ShieldCheck, Battery, Zap, Activity } from 'lucide-react';
+import { Mail, Lock, ArrowRight, ShieldCheck, Battery, Zap, Activity, Shield, User } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+
+// Matches backend/seed.py exactly - the two accounts that actually exist
+// after `python seed.py`. The previous version of this panel pointed at
+// admin@bms.local/adminpass and engineer@bms.local/engpass: a wrong
+// password for the real admin account, and an "Engineer" account/role that
+// was never seeded and doesn't exist in the two-role (admin/user) model at
+// all - so both buttons always failed. Keep this in sync with seed.py if the
+// demo accounts ever change.
+const DEMO_ACCOUNTS = [
+  { role: 'Admin', email: 'admin@bms.local', password: 'admin123', desc: 'Full fleet access', icon: Shield },
+  { role: 'User', email: 'user@bms.local', password: 'user123', desc: 'Assigned devices only', icon: User },
+];
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -142,28 +154,33 @@ export default function LoginPage() {
             </button>
           </form>
           
-          {/* Quick Login Section */}
-          <div style={{ marginTop: '2rem', borderTop: '1px solid var(--border-color)', paddingTop: '1.5rem' }}>
-            <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '1rem', textAlign: 'center' }}>Quick Login (Demo)</p>
+          {/* Quick Login Section — seeded demo accounts only (see backend/seed.py) */}
+          <div style={{ marginTop: '2rem', borderTop: '1px solid var(--border-default)', paddingTop: '1.5rem' }}>
+            <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.85rem', textAlign: 'center', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>
+              Quick Login — Demo Accounts
+            </p>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-              <button 
-                type="button"
-                onClick={() => handleQuickLogin('admin@bms.local', 'adminpass')}
-                className="btn-secondary" 
-                style={{ fontSize: '0.85rem', padding: '0.5rem' }}
-                disabled={loading}
-              >
-                Admin Role
-              </button>
-              <button 
-                type="button"
-                onClick={() => handleQuickLogin('engineer@bms.local', 'engpass')}
-                className="btn-secondary" 
-                style={{ fontSize: '0.85rem', padding: '0.5rem' }}
-                disabled={loading}
-              >
-                Engineer Role
-              </button>
+              {DEMO_ACCOUNTS.map(({ role, email: demoEmail, password: demoPassword, desc, icon: Icon }) => (
+                <button
+                  key={role}
+                  type="button"
+                  onClick={() => handleQuickLogin(demoEmail, demoPassword)}
+                  disabled={loading}
+                  style={{
+                    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.35rem',
+                    padding: '0.85rem 0.5rem', background: 'var(--bg-secondary)', border: '1px solid var(--border-default)',
+                    borderRadius: 'var(--radius-md)', cursor: loading ? 'default' : 'pointer', transition: 'border-color 0.15s, transform 0.15s',
+                    opacity: loading ? 0.6 : 1,
+                  }}
+                  onMouseEnter={(e) => { if (!loading) e.currentTarget.style.borderColor = 'var(--accent-primary)'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--border-default)'; }}
+                >
+                  <Icon size={18} color="var(--accent-primary)" />
+                  <span style={{ fontWeight: 600, fontSize: '0.85rem', color: 'var(--text-primary)' }}>{role}</span>
+                  <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{desc}</span>
+                  <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', fontFamily: 'monospace' }}>{demoEmail}</span>
+                </button>
+              ))}
             </div>
           </div>
 
