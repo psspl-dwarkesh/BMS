@@ -1,6 +1,12 @@
 import { Activity, ArrowRight, CheckCircle2, XCircle, Database, TrendingUp, AlertTriangle, Shield, Cpu, Zap, BarChart3, Thermometer, FileText, Battery, ChevronRight } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 
-export default function LandingPage({ onEnter, onDocs }) {
+export default function LandingPage() {
+  const navigate = useNavigate();
+  
+  const onEnter = () => navigate('/login');
+  const onDocs = () => navigate('/docs');
+
   const scrollTo = (id) => {
     const el = document.getElementById(id);
     if (el) el.scrollIntoView({ behavior: 'smooth' });
