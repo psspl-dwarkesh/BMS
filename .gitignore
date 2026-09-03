@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# SQLite (recreated on boot via SQLAlchemy metadata.create_all)
+backend/bms_analytics.db
+
+# Node / Vite
+node_modules/
+bms-portal/dist/
+bms-portal/.vite/
+
+# Editor / OS
+.DS_Store
+Thumbs.db

@@ -40,8 +40,12 @@ export default function Layout({ user, analyticsData, onDataProcessed, onUpdateD
 
   // Initialize WebSocket for real-time alerts
   useEffect(() => {
-    // In a real app this would point to the deployed FastAPI backend
-    wsRef.current = new WebSocket('ws://localhost:8000/ws/alerts');
+    // Same-origin in production (FastAPI serves this build directly); falls back
+    // to the local dev backend when running under `vite dev` on its own port.
+    const wsUrl = import.meta.env.DEV
+      ? 'ws://localhost:8000/ws/alerts'
+      : `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws/alerts`;
+    wsRef.current = new WebSocket(wsUrl);
     
     wsRef.current.onmessage = (event) => {
       try {
