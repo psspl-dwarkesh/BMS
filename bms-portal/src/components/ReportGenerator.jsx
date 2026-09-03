@@ -15,7 +15,8 @@ export default function ReportGenerator({ data }) {
 
     setTimeout(() => {
       const doc = new jsPDF();
-      const { kpis, timeSeries, anomalies, status } = data;
+      const { kpis, timeSeries, status, dataQuality, findings = [] } = data;
+      const anomalies = data.allAnomalies || data.anomalies || [];
       const pack = kpis.pack;
       const now = new Date();
 
@@ -28,18 +29,31 @@ export default function ReportGenerator({ data }) {
       doc.text('BMS Analytics Report', 15, 20);
       doc.setFontSize(10);
       doc.setFont('helvetica', 'normal');
-      doc.text(`Generated: ${now.toLocaleString()}  |  Status: ${status}`, 15, 30);
+      doc.text(`Generated: ${now.toLocaleString()}  |  Status: ${status}  |  Data Quality: ${dataQuality.tier} (${dataQuality.score}%)`, 15, 30);
 
-      // KPIs Section
+      // Key Findings Section
       doc.setTextColor(0, 0, 0);
       doc.setFontSize(14);
       doc.setFont('helvetica', 'bold');
-      doc.text('Pack-Level KPIs', 15, 55);
-      
+      doc.text('Key Findings', 15, 50);
+      doc.setFontSize(9);
+      doc.setFont('helvetica', 'normal');
+      let findingsY = 57;
+      findings.forEach(f => {
+        const lines = doc.splitTextToSize(`- ${f.category}: ${f.text}`, 180);
+        doc.text(lines, 15, findingsY);
+        findingsY += lines.length * 4.5;
+      });
+
+      // KPIs Section
+      doc.setFontSize(14);
+      doc.setFont('helvetica', 'bold');
+      doc.text('Pack-Level KPIs', 15, findingsY + 8);
+
       const n = (v, d = 1) => (v === null || v === undefined || isNaN(v)) ? 'N/A' : `${v.toFixed(d)}`;
 
       autoTable(doc, {
-        startY: 60,
+        startY: findingsY + 13,
         head: [['Metric', 'Value', 'Min', 'Max']],
         body: [
           ['Avg Voltage', `${n(pack.avgVoltage, 2)} V`, `${n(pack.minVoltage)} V`, `${n(pack.maxVoltage)} V`],
@@ -54,6 +68,9 @@ export default function ReportGenerator({ data }) {
           ['Operating Duration', `${pack.operatingDurationHrs.toFixed(1)} h`, '-', '-'],
           ['Charge Duration', `${pack.chargeDurationHrs.toFixed(1)} h`, '-', '-'],
           ['Discharge Duration', `${pack.dischargeDurationHrs.toFixed(1)} h`, '-', '-'],
+          ['Weakest Cell', pack.weakestCell ? `${pack.weakestCell.name} (${pack.weakestCell.avgVoltage.toFixed(3)} V avg)` : 'N/A', '-', '-'],
+          ['Strongest Cell', pack.strongestCell ? `${pack.strongestCell.name} (${pack.strongestCell.avgVoltage.toFixed(3)} V avg)` : 'N/A', '-', '-'],
+          ['Cell-to-Cell Temp Diff (peak)', (pack.maxCellTempSpread !== null && pack.maxCellTempSpread !== undefined) ? `${pack.maxCellTempSpread.toFixed(1)} °C` : 'N/A', '-', '-'],
         ],
         headStyles: { fillColor: [8, 145, 178], textColor: 255, fontStyle: 'bold' },
         alternateRowStyles: { fillColor: [240, 249, 255] },
@@ -65,7 +82,7 @@ export default function ReportGenerator({ data }) {
         const anomalyY = doc.lastAutoTable.finalY + 15;
         doc.setFontSize(14);
         doc.setFont('helvetica', 'bold');
-        doc.text('Detected Anomalies', 15, anomalyY);
+        doc.text(`Detected Anomalies (${anomalies.length})`, 15, anomalyY);
 
         autoTable(doc, {
           startY: anomalyY + 5,
@@ -119,15 +136,25 @@ export default function ReportGenerator({ data }) {
   
   const generateCSV = () => {
     if (!data) return;
-    const { kpis, anomalies, status } = data;
+    const { kpis, status, dataQuality, findings = [] } = data;
+    const anomalies = data.allAnomalies || data.anomalies || [];
     const pack = kpis.pack;
-    
+
     const n = (v, d = 1) => (v === null || v === undefined || isNaN(v)) ? 'N/A' : v.toFixed(d);
+    const csvEscape = (str) => `"${String(str).replace(/"/g, '""')}"`;
 
     let csvContent = "data:text/csv;charset=utf-8,";
     csvContent += "BMS Analytics Summary Report\n\n";
     csvContent += `Generated,${new Date().toISOString()}\n`;
-    csvContent += `Overall Status,${status}\n\n`;
+    csvContent += `Overall Status,${status}\n`;
+    csvContent += `Data Quality,${dataQuality.tier} (${dataQuality.score}%)\n\n`;
+
+    csvContent += "--- KEY FINDINGS ---\n";
+    csvContent += "Category,Severity,Finding\n";
+    findings.forEach(f => {
+      csvContent += `${f.category},${f.severity},${csvEscape(f.text)}\n`;
+    });
+    csvContent += "\n";
 
     csvContent += "--- PACK KPIs ---\n";
     csvContent += "Metric,Value,Unit\n";
@@ -147,18 +174,21 @@ export default function ReportGenerator({ data }) {
     csvContent += `Charge/Discharge Efficiency,${pack.chargeDischargeEfficiency !== null ? pack.chargeDischargeEfficiency.toFixed(1) : 'N/A'},%\n`;
     csvContent += `Operating Duration,${pack.operatingDurationHrs.toFixed(1)},hours\n`;
     csvContent += `Charge Duration,${pack.chargeDurationHrs.toFixed(1)},hours\n`;
-    csvContent += `Discharge Duration,${pack.dischargeDurationHrs.toFixed(1)},hours\n\n`;
-    
-    csvContent += "--- ANOMALIES ---\n";
+    csvContent += `Discharge Duration,${pack.dischargeDurationHrs.toFixed(1)},hours\n`;
+    csvContent += `Weakest Cell,${pack.weakestCell ? `${pack.weakestCell.name} (${pack.weakestCell.avgVoltage.toFixed(3)}V avg)` : 'N/A'},\n`;
+    csvContent += `Strongest Cell,${pack.strongestCell ? `${pack.strongestCell.name} (${pack.strongestCell.avgVoltage.toFixed(3)}V avg)` : 'N/A'},\n`;
+    csvContent += `Cell-to-Cell Temp Diff (peak),${(pack.maxCellTempSpread !== null && pack.maxCellTempSpread !== undefined) ? pack.maxCellTempSpread.toFixed(1) : 'N/A'},C\n\n`;
+
+    csvContent += `--- ANOMALIES (${anomalies.length}) ---\n`;
     csvContent += "Time,Severity,Type,Description,Component\n";
     if (anomalies && anomalies.length > 0) {
       anomalies.forEach(a => {
-        csvContent += `${a.timestamp},${a.severity},${a.type},"${a.description}",${a.affected}\n`;
+        csvContent += `${a.timestamp},${a.severity},${a.type},${csvEscape(a.description)},${a.affected}\n`;
       });
     } else {
       csvContent += "No anomalies detected.\n";
     }
-    
+
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
@@ -239,9 +269,9 @@ export default function ReportGenerator({ data }) {
                 <div className="card-title" style={{ marginBottom: '1rem' }}>Report Preview</div>
                 <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                   <div>📊 Pack KPIs: Voltage, Current, Temperature, SOC, SOH, Energy, Efficiency, Duration</div>
-                  <div>⚠️ Anomalies: {data.anomalies?.length || 0} detected events</div>
+                  <div>⚠️ Anomalies: {data.anomalySummary?.total ?? data.anomalies?.length ?? 0} detected events</div>
                   <div>📈 Time-series: {data.timeSeries?.length || 0} sampled data points</div>
-                  <div>🔋 Cell Analysis: 4-cell voltage distribution</div>
+                  <div>🔋 Cell Analysis: {data.signalsAvailable?.cellVoltage ? 'per-cell voltage distribution included' : 'no per-cell voltage data in this CSV'}</div>
                   {reportType === 'full' && <div>📋 Full tables with sampled row data</div>}
                 </div>
               </div>

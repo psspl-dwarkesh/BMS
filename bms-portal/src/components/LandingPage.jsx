@@ -62,7 +62,7 @@ export default function LandingPage({ onEnter, onDocs }) {
             {[
               { label: 'Cells Monitored', value: '96+', color: 'var(--accent-primary)' },
               { label: 'Data Points / Pack', value: '50k+', color: 'var(--success)' },
-              { label: 'Anomaly Types', value: '5+', color: 'var(--warning)' },
+              { label: 'Anomaly Types', value: '9+', color: 'var(--warning)' },
               { label: 'Response Time', value: '<100ms', color: 'var(--info)' },
             ].map((kpi, i) => (
               <div key={i} style={{ textAlign: 'center' }}>

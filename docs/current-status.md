@@ -1,6 +1,6 @@
 # BMS Portal — Current Status & Roadmap
 
-> **Last Updated:** 2026-09-02
+> **Last Updated:** 2026-09-03
 
 This snapshot reflects what's actually in the repo right now, not the original plan — see
 [frontend-standards.md](frontend-standards.md) for the component inventory it's based on.
@@ -20,17 +20,19 @@ separately.
 ### Frontend — real & working (client-side)
 - [x] Landing page → mock-login → portal flow (`App.jsx`, `LandingPage.jsx`, `LoginPage.jsx`)
 - [x] Portal layout with sidebar nav, topbar, notifications dropdown, settings/profile/access-control modals (`Layout.jsx`)
-- [x] Fleet Overview, Single Pack Dashboard, Data Quality, Cell Analysis, Degradation, Thermal, Alerts tabs
+- [x] Fleet Overview, Single Pack Dashboard, Data Quality, Cell Analysis, Degradation, Thermal, Alerts, Findings & Outputs tabs
 - [x] CSV upload with drag-and-drop, multi-file queueing, two bundled "predefined validation case" datasets, and a default sample dataset auto-loaded on login (`DataIngestion.jsx`, `csvParser.js`)
 - [x] Column auto-detection by header keyword matching (`voltage`, `current`, `temp`, `soc`, `cell`, `cycle`, etc.) — not a configurable mapping UI
-- [x] Data Quality scoring (missing signals, invalid values, timestamp gaps) computed from the parsed CSV
-- [x] Cell voltage heatmap + bar chart (96-cell grid)
+- [x] Data Quality scoring (missing signals, invalid values incl. a proportional score penalty, timestamp gaps) with a Good/Limited/Insufficient tier, computed from the parsed CSV
+- [x] Cell Analysis: interactive 3D WebGL pack viewer + voltage bar chart + temperature distribution bar chart, all sized to however many `CellN_Voltage`/`CellN_Temp` columns the CSV actually has (never a fixed 96) — plus weakest/strongest-cell KPIs
 - [x] Time-series charts (Voltage, Current, SOC, Cell Spread) via Recharts
-- [x] Degradation view: SOH/capacity-fade curve driven by an in-browser Extended Kalman Filter over Coulomb-counted throughput
-- [x] Anomaly detection: voltage imbalance (>100mV spread) and over-temperature (>45°C), computed client-side
-- [x] PDF and CSV report export (`ReportGenerator.jsx`, via jsPDF)
+- [x] Degradation view: SOH/capacity-fade curve driven by an in-browser Extended Kalman Filter over Coulomb-counted throughput when the CSV lacks SOH/Capacity columns; reads them directly when present. SOH and Capacity are labeled measured/estimated independently (a CSV can have one without the other)
+- [x] Dedicated Thermal Analysis tab (`ThermalAnalysis.jsx`): pack temp KPIs, temp-vs-time chart, cell-to-cell temperature difference chart, thermal-anomaly table — all null-safe when temperature data is absent
+- [x] Anomaly detection (9 types, client-side): cell voltage imbalance, per-cell over/under-voltage, pack over-temperature, cell over-temperature, cell-to-cell temperature imbalance, statistical current outliers, abnormal degradation pattern (measured SOH only), and low data-quality-score
+- [x] Automated Findings & Outputs tab (`AutomatedFindings.jsx`): plain-language Key Findings generated from the actual computed KPIs/anomalies, plus an Integration View mapping available outputs to potential BMS/vehicle-control use cases (filtered to what this CSV actually supports)
+- [x] PDF and CSV report export (`ReportGenerator.jsx`, via jsPDF) — includes Key Findings, the full anomaly list, and weakest/strongest-cell + cell-temp-spread KPIs, not just a 5-row preview
 - [x] Black & white enterprise theme, responsive layout
-- [x] In-app documentation view (`Documentation.jsx`)
+- [x] In-app documentation view (`Documentation.jsx`), incl. visual on-board/cloud/hybrid deployment diagrams and an outputs → vehicle-control mapping reference page
 
 ### Frontend — mocked / simulated (worth knowing before you build on it)
 - **Login has no real backend.** `LoginPage.jsx` checks against 3 hardcoded users
@@ -40,11 +42,13 @@ separately.
 - **Fleet Overview is 100% fake data.** `FleetDashboard.jsx` generates 256 random packs
   (`Math.random()`) on every mount; it has no relationship to the `GET /api/v1/packs` endpoint or
   any uploaded dataset.
-- **SOH is a placeholder formula**, not a model: `estimatedSOH = 100 - (maxTemp > 45 ? 2 : 1)`
-  (see `csvParser.js`). The Degradation tab's EKF-based SOH/capacity curve is more sophisticated
-  but still a heuristic filter, not a validated battery model.
-- **Cell-level data is synthesized when absent.** If a CSV has no `CellN_Voltage` columns, 96 cell
-  voltages are fabricated by jittering pack voltage / 96 with `Math.random()`.
+- **Client-side SOH is still a heuristic, not a validated model.** `csvParser.js` reads SOH/Capacity
+  directly from the CSV when present (labeled "measured"); otherwise it derives them from an
+  Extended Kalman Filter over Coulomb-counted throughput assuming a 50Ah nominal pack (labeled
+  "estimated"). No fallback is ever presented as measured, and no value is fabricated when there's
+  no signal to base it on — but the EKF itself is still a heuristic filter, not a trained/validated
+  battery model (the backend's `/predict/rul` RandomForestRegressor is the closer-to-real one; the
+  frontend doesn't call it — see the gap list below).
 - **Custom Alert Rules, Access Control (user list), and Profile editing** in the settings modals
   are UI-only — nothing is persisted or enforced.
 - Two dead/unused components remain in the tree: `Sidebar.jsx` and `FileUpload.jsx` (superseded by
@@ -79,9 +83,9 @@ separately.
   removing the backend from the pitch) is the biggest structural gap.
 - [ ] Real authentication (backend-issued, verified JWT; no hardcoded credentials)
 - [ ] Fleet Overview backed by real pack records instead of random data
-- [ ] Client-side SOH (Dashboard placeholder formula + Degradation tab's EKF) still needs to move
-  to a trained/validated model — the backend's `/predict/rul` now has one, but nothing in the UI
-  calls it yet
+- [ ] Client-side SOH (the Dashboard/Degradation tabs' EKF heuristic) still needs to move to a
+  trained/validated model — the backend's `/predict/rul` now has one, but nothing in the UI calls
+  it yet
 - [ ] Backend CSV ingestion beyond the first 50 rows, with real SOC/temperature extraction, and
   storing per-row sample timestamps so RUL feature extraction can use real elapsed time instead of
   an assumed sampling interval
@@ -117,7 +121,7 @@ separately.
 
 | # | Issue | Severity | Status |
 |---|-------|----------|--------|
-| 1 | SOH estimation is a mock formula on the Dashboard; Degradation tab's EKF is a heuristic, not a validated model | Medium | Needs real model (backend has one now, frontend doesn't call it) |
+| 1 | Client-side SOH/Capacity (Dashboard + Degradation tab) is an honestly-labeled EKF heuristic when the CSV lacks the signal, not a trained model | Medium | Needs real model (backend has one now, frontend doesn't call it) |
 | 2 | ~~Backend `/predict/rul` uses an untrained neural net blended with a heuristic~~ | ~~Medium~~ | Fixed — now a RandomForestRegressor trained on real NASA discharge data |
 | 3 | Backend only stores first 50 rows per upload | Low | Demo limitation |
 | 4 | Frontend does not call the backend for upload/predict — two disconnected systems | Medium | Needs integration |

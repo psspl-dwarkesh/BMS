@@ -42,12 +42,15 @@ export default function DataQuality({ analyticsData }) {
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
             <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Overall Score:</span>
-            <div style={{ 
-              background: 'var(--bg-secondary)', 
-              padding: '0.5rem 1rem', 
-              borderRadius: '2rem', 
-              fontSize: '1.25rem', 
-              fontWeight: '700', 
+            {dataQuality.tier && (
+              <span className={`badge ${getScoreBadge(dataQuality.score)}`}>{dataQuality.tier}</span>
+            )}
+            <div style={{
+              background: 'var(--bg-secondary)',
+              padding: '0.5rem 1rem',
+              borderRadius: '2rem',
+              fontSize: '1.25rem',
+              fontWeight: '700',
               color: getScoreColor(dataQuality.score),
               border: `1px solid ${getScoreColor(dataQuality.score)}20`
             }}>
