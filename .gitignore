@@ -4,14 +4,23 @@ __pycache__/
 *.pyo
 .venv/
 venv/
+backend/venv/
 
-# SQLite (recreated on boot via SQLAlchemy metadata.create_all)
+# SQLite
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
 backend/bms_analytics.db
 
 # Node / Vite
 node_modules/
+dist/
 bms-portal/dist/
 bms-portal/.vite/
+
+# Config
+.env
 
 # Editor / OS
 .DS_Store

@@ -1,130 +1,136 @@
-from fastapi import FastAPI, Depends, UploadFile, File, WebSocket, WebSocketDisconnect, BackgroundTasks
+"""
+Main FastAPI application entrypoint.
+
+Wires up the routers, configures CORS from .env, manages the background
+simulator lifecycle, and handles static file serving.
+"""
+from contextlib import asynccontextmanager
+import logging
+
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
-from sqlalchemy.orm import Session
-import models
-import os
-from database import engine, SessionLocal
-import pandas as pd
-import io
-import ml_inference
+from fastapi.responses import FileResponse, JSONResponse
+
+from config import settings
+from database import engine, Base
 from ws_manager import manager
-import tasks
+from simulator import start_simulator, stop_simulator
 
-models.Base.metadata.create_all(bind=engine)
+# Import all APIRouters
+from routers import (
+    auth, users, devices, telemetry, location, alerts, predict
+)
 
-app = FastAPI(title="Enterprise BMS API")
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+)
+log = logging.getLogger("bms.main")
 
-# Setup CORS for the React frontend
+# ── Lifespan ──────────────────────────────────────────────────────────────────
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Ensure tables exist (we rely on seed.py for initial data, but create_all is safe)
+    Base.metadata.create_all(bind=engine)
+    
+    if settings.SIMULATOR_ENABLED:
+        await start_simulator(tick_seconds=settings.SIMULATOR_TICK_SECONDS)
+    
+    yield
+    
+    if settings.SIMULATOR_ENABLED:
+        await stop_simulator()
+
+
+app = FastAPI(title="Enterprise BMS API", lifespan=lifespan)
+
+
+# ── Middleware ────────────────────────────────────────────────────────────────
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "*"],
-    allow_credentials=True,
+    allow_origins=settings.cors_origins_list,
+    allow_credentials=False,  # We use Bearer tokens, not cookies
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Dependency
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+
+# ── Routers ───────────────────────────────────────────────────────────────────
+
+app.include_router(auth.router)
+app.include_router(users.router)
+app.include_router(devices.router)
+app.include_router(telemetry.router)
+app.include_router(location.router)
+app.include_router(alerts.router)
+app.include_router(predict.router)
+
 
 @app.get("/api")
 def read_root():
-    return {"status": "Enterprise BMS API is running"}
+    return {"status": "Enterprise BMS API is running", "simulator": settings.SIMULATOR_ENABLED}
+
+
+# ── WebSockets ────────────────────────────────────────────────────────────────
 
 @app.websocket("/ws/alerts")
-async def websocket_endpoint(websocket: WebSocket):
-    await manager.connect(websocket)
+async def websocket_endpoint(websocket: WebSocket, token: str = None):
+    """
+    Unified WebSocket endpoint for both ALERTS and TELEMETRY_UPDATES.
+    Requires ?token=<jwt> for authentication.
+    """
+    if not token:
+        await websocket.close(code=4001, reason="Missing token")
+        return
+
+    from routers import decode_token
+    import jwt
+    from database import SessionLocal
+    from models import User
+
     try:
+        payload = decode_token(token)
+        user_id = int(payload.get("sub", 0))
+        
+        # Verify user still exists/active and get their device assignments
+        db = SessionLocal()
+        try:
+            user = db.query(User).filter(User.id == user_id, User.is_active == True).first()
+            if not user:
+                await websocket.close(code=4001, reason="Invalid user")
+                return
+            
+            from routers import get_user_device_ids
+            device_ids = get_user_device_ids(user, db)
+            role = user.role.value
+        finally:
+            db.close()
+            
+        await manager.accept_authenticated(websocket, user_id, role, device_ids)
+        
         while True:
-            # Keep connection alive
-            data = await websocket.receive_text()
+            # Keep connection alive, can accept client pings here
+            _ = await websocket.receive_text()
+            
+    except jwt.PyJWTError:
+        await websocket.close(code=4001, reason="Invalid token")
     except WebSocketDisconnect:
-        manager.disconnect(websocket)
+        manager.remove(websocket)
 
-@app.post("/api/v1/packs/upload")
-async def upload_pack_data(background_tasks: BackgroundTasks, file: UploadFile = File(...), db: Session = Depends(get_db)):
-    # Read CSV data
-    contents = await file.read()
-    df = pd.read_csv(io.StringIO(contents.decode('utf-8')))
-    
-    # 1. Create a new Battery Pack record
-    new_pack = models.BatteryPack(
-        pack_name=f"Pack_{file.filename.split('.')[0]}",
-        status="Active"
-    )
-    db.add(new_pack)
-    db.commit()
-    db.refresh(new_pack)
-    
-    # 2. Extract standard columns (simplified logic for mapping)
-    # This would ideally use the mapping sent from the frontend
-    # But for now we simulate storing the first 50 rows of telemetry
-    
-    try:
-        # Looking for generic columns based on our NASA/Sample dataset
-        v_col = [c for c in df.columns if 'voltage' in c.lower()][0]
-        c_col = [c for c in df.columns if 'current' in c.lower()][0]
-        
-        telemetry_records = []
-        for index, row in df.head(50).iterrows(): # Just 50 for demo speed
-            telemetry_records.append(
-                models.PackTelemetry(
-                    pack_id=new_pack.id,
-                    voltage=float(row[v_col]) if v_col else 0.0,
-                    current=float(row[c_col]) if c_col else 0.0,
-                    soc=100.0, # Placeholder
-                    temperature=25.0 # Placeholder
-                )
-            )
-        db.bulk_save_objects(telemetry_records)
-        db.commit()
-        
-        # Dispatch background worker task for ISO-26262 Anomaly Detection
-        # Passing raw dicts to simulate the serialization boundary of a Celery/Redis queue
-        task_payload = [{"voltage": r.voltage, "current": r.current, "temperature": r.temperature} for r in telemetry_records]
-        background_tasks.add_task(tasks.check_iso26262_violations, task_payload, manager)
-        
-    except Exception as e:
-        print(f"Error parsing telemetry: {e}")
-        pass
 
-    return {
-        "message": "Data successfully ingested into database",
-        "pack_id": new_pack.id,
-        "rows_processed": len(df)
-    }
+# ── Static File Serving (SPA Fallback) ────────────────────────────────────────
 
-@app.get("/api/v1/packs")
-def get_packs(db: Session = Depends(get_db)):
-    packs = db.query(models.BatteryPack).all()
-    return packs
-
-@app.post("/api/v1/predict/rul")
-async def predict_rul(pack_id: int, db: Session = Depends(get_db)):
-    # Retrieve telemetry for the pack
-    telemetry = db.query(models.PackTelemetry).filter(models.PackTelemetry.pack_id == pack_id).order_by(models.PackTelemetry.timestamp).all()
-    
-    if not telemetry or len(telemetry) < 10:
-        return {"error": "Insufficient telemetry data for RUL prediction. Please upload more data."}
-        
-    voltage_data = [t.voltage for t in telemetry]
-    current_data = [t.current for t in telemetry]
-    temp_data = [t.temperature for t in telemetry]
-    
-    # Run the PyTorch inference model
-    prediction = ml_inference.run_rul_inference(voltage_data, current_data, temp_data)
-    
-    return prediction
-
-# Serve React App
 app.mount("/", StaticFiles(directory="../bms-portal/dist", html=True), name="static")
 
 @app.exception_handler(404)
 async def catch_all_for_spa(request, exc):
+    """
+    Any 404 falling through the API routers should serve the React SPA index.html,
+    allowing react-router to handle the route on the client side.
+    """
+    if request.url.path.startswith("/api/"):
+        return JSONResponse(status_code=404, content={"detail": "Not Found"})
     return FileResponse("../bms-portal/dist/index.html")

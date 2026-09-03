@@ -66,7 +66,7 @@ export default function Documentation({ onBack }) {
             </ul>
 
             <div className="doc-note">
-              <strong>Note:</strong> This portal is currently in Demo mode. All analytics processing happens securely within your browser session.
+              <strong>Note:</strong> This portal is now running against the live FastAPI backend with multi-tenant authentication and SQLite persistence.
             </div>
           </div>
         );
@@ -80,7 +80,7 @@ export default function Documentation({ onBack }) {
             <p>Navigate to the login screen and select a role. For exploring all features, select the <strong>Admin</strong> or <strong>Engineer</strong> role.</p>
             
             <h3>2. Loading Data</h3>
-            <p>Upon login, the system will automatically parse a sample 50-cycle dataset. If you wish to upload your own data, navigate to the <strong>Data Upload</strong> tab and select a valid `.csv` file.</p>
+            <p>Upon login, the system connects to the backend API. The simulator provides live data streams, or you can use the <strong>Data Ingestion</strong> tab on a device to upload historical `.csv` telemetry.</p>
 
             <h3>3. Exploring Insights</h3>
             <p>Once data is loaded, navigate through the sidebar to view:</p>

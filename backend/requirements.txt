@@ -6,3 +6,7 @@ python-multipart
 pandas
 scikit-learn
 joblib
+PyJWT
+bcrypt
+pydantic-settings
+python-dotenv
