@@ -25,6 +25,21 @@ export default function LoginPage() {
     }
   };
 
+  const handleQuickLogin = async (quickEmail, quickPassword) => {
+    setEmail(quickEmail);
+    setPassword(quickPassword);
+    setError('');
+    setLoading(true);
+    
+    const res = await login(quickEmail, quickPassword);
+    if (res.success) {
+      navigate('/app');
+    } else {
+      setError(res.error || 'Invalid credentials');
+      setLoading(false);
+    }
+  };
+
   return (
     <div style={{ display: 'flex', height: '100vh', width: '100vw' }}>
       {/* Left panel */}
@@ -126,6 +141,31 @@ export default function LoginPage() {
               )}
             </button>
           </form>
+          
+          {/* Quick Login Section */}
+          <div style={{ marginTop: '2rem', borderTop: '1px solid var(--border-color)', paddingTop: '1.5rem' }}>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '1rem', textAlign: 'center' }}>Quick Login (Demo)</p>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+              <button 
+                type="button"
+                onClick={() => handleQuickLogin('admin@bms.local', 'adminpass')}
+                className="btn-secondary" 
+                style={{ fontSize: '0.85rem', padding: '0.5rem' }}
+                disabled={loading}
+              >
+                Admin Role
+              </button>
+              <button 
+                type="button"
+                onClick={() => handleQuickLogin('engineer@bms.local', 'engpass')}
+                className="btn-secondary" 
+                style={{ fontSize: '0.85rem', padding: '0.5rem' }}
+                disabled={loading}
+              >
+                Engineer Role
+              </button>
+            </div>
+          </div>
 
           <div style={{ marginTop: '2.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', color: 'var(--text-muted)', fontSize: '0.75rem' }}>
             <ShieldCheck size={14} />
