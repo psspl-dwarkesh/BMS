@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
+import { useMutation } from '@tanstack/react-query';
 import Papa from 'papaparse';
-import { Upload, FileText, CheckCircle, AlertTriangle, Sparkles, X } from 'lucide-react';
+import { Upload, FileText, CheckCircle, AlertTriangle, Sparkles, X, Eye, EyeOff, Trash2 } from 'lucide-react';
 import { telemetryApi, devicesApi } from '../api/endpoints';
 
 // Bundled demo datasets (see backend/scripts/gen_sample_csvs.py for how
@@ -38,54 +38,80 @@ function humanizeFilename(name) {
   return name.replace(/\.csv$/i, '').replace(/[_-]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+let nextBatchId = 1;
+
 const SignalBadge = ({ ok, label }) => (
   <span className={`badge badge-${ok ? 'success' : 'neutral'}`} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
     {ok ? <CheckCircle size={12} /> : <AlertTriangle size={12} />} {label}
   </span>
 );
 
+// Upload & Analyze (app/upload): no device yet. Supports adding one or more
+// CSVs at once (a device may have several historical logs, similar to how
+// real telemetry arrives in batches) - each one can be previewed, toggled
+// in/out of the import, or removed before anything is sent to the backend.
+// On submit, a new device is created and every enabled file is imported
+// into it in order, then the user lands on its Automated Analytics Report.
 export default function DataIngestion() {
-  const { id } = useParams();
   const navigate = useNavigate();
-  const isNewBatteryMode = !id;
 
-  const [file, setFile] = useState(null);
-  const [preview, setPreview] = useState(null); // { rowCount, signals }
+  // batch entries: { id, file, name, size, preview: {rowCount, signals}|null, included, expanded }
+  const [batch, setBatch] = useState([]);
+  const [activeId, setActiveId] = useState(null); // which entry's preview is currently expanded/"current"
   const [packName, setPackName] = useState('');
   const [message, setMessage] = useState(null);
   const [dragOver, setDragOver] = useState(false);
+  const [uploadingFileId, setUploadingFileId] = useState(null);
 
-  const { data: device } = useQuery({
-    queryKey: ['device', id],
-    queryFn: () => devicesApi.getDevice(id),
-    enabled: !!id,
-  });
-
-  const parseFile = (f, defaultName) => {
-    setFile(f);
-    setPreview(null);
+  const addFiles = (fileList, defaultName) => {
+    const files = Array.from(fileList || []).filter((f) => f);
+    if (files.length === 0) return;
     setMessage(null);
-    if (isNewBatteryMode) setPackName(defaultName || humanizeFilename(f.name));
-    Papa.parse(f, {
-      header: true,
-      skipEmptyLines: true,
-      preview: 2000, // cap client-side parse cost for a very large file - the real import runs server-side on the full file
-      complete: (results) => {
-        const headers = results.meta.fields || [];
-        setPreview({ rowCount: results.data.length, signals: detectSignals(headers) });
-      },
-      error: () => setPreview(null),
+
+    const entries = files.map((f) => ({
+      id: nextBatchId++,
+      file: f,
+      name: f.name,
+      size: f.size,
+      preview: null,
+      included: true,
+      expanded: false,
+    }));
+
+    setBatch((prev) => {
+      const next = [...prev, ...entries];
+      // Default the pack name from the first file ever added.
+      if (prev.length === 0) setPackName(defaultName || humanizeFilename(files[0].name));
+      return next;
+    });
+    setActiveId(entries[entries.length - 1].id);
+
+    entries.forEach((entry) => {
+      Papa.parse(entry.file, {
+        header: true,
+        skipEmptyLines: true,
+        preview: 2000, // cap client-side parse cost for a very large file - the real import runs server-side on the full file
+        complete: (results) => {
+          const headers = results.meta.fields || [];
+          const preview = { rowCount: results.data.length, signals: detectSignals(headers) };
+          setBatch((prev) => prev.map((e) => (e.id === entry.id ? { ...e, preview } : e)));
+        },
+        error: () => {
+          setBatch((prev) => prev.map((e) => (e.id === entry.id ? { ...e, preview: { rowCount: 0, signals: null, error: true } } : e)));
+        },
+      });
     });
   };
 
   const handleFileChange = (e) => {
-    if (e.target.files && e.target.files[0]) parseFile(e.target.files[0]);
+    addFiles(e.target.files);
+    e.target.value = ''; // allow re-selecting the same file(s) again
   };
 
   const handleDrop = (e) => {
     e.preventDefault();
     setDragOver(false);
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) parseFile(e.dataTransfer.files[0]);
+    addFiles(e.dataTransfer.files);
   };
 
   const loadSample = async (sample) => {
@@ -94,62 +120,67 @@ export default function DataIngestion() {
       const res = await fetch(sample.file);
       const blob = await res.blob();
       const f = new File([blob], sample.file.split('/').pop(), { type: 'text/csv' });
-      parseFile(f, sample.packName);
+      addFiles([f], sample.packName);
     } catch {
       setMessage({ type: 'error', text: 'Failed to load the sample dataset.' });
     }
   };
 
-  const clearFile = () => {
-    setFile(null);
-    setPreview(null);
+  const removeFile = (id) => {
+    setBatch((prev) => prev.filter((e) => e.id !== id));
+    setActiveId((cur) => (cur === id ? null : cur));
+  };
+
+  const toggleIncluded = (id) => {
+    setBatch((prev) => prev.map((e) => (e.id === id ? { ...e, included: !e.included } : e)));
+  };
+
+  const toggleExpanded = (id) => {
+    setBatch((prev) => prev.map((e) => (e.id === id ? { ...e, expanded: !e.expanded } : e)));
+    setActiveId(id);
+  };
+
+  const clearAll = () => {
+    setBatch([]);
+    setActiveId(null);
     setMessage(null);
   };
 
-  // Backfill an existing device's history (devices/:id/upload).
-  const backfillMutation = useMutation({
-    mutationFn: (f) => telemetryApi.importCsv(id, f),
-    onSuccess: (data) => {
-      setMessage({ type: 'success', text: data.message || 'File uploaded successfully.' });
-      clearFile();
-    },
-    onError: (err) => {
-      setMessage({ type: 'error', text: err.response?.data?.detail || err.message || 'Failed to upload file' });
-    },
-  });
+  const includedFiles = batch.filter((e) => e.included);
 
-  // Create a brand-new device from an uploaded CSV, then import it, then go
-  // straight to its automated analytics report (app/upload, no :id yet).
+  // Create a brand-new device sized from the first included file's detected
+  // signals, then import every included file into it in order, then go
+  // straight to its automated analytics report.
   const createMutation = useMutation({
-    mutationFn: async ({ f, name, signals }) => {
+    mutationFn: async ({ files, name }) => {
+      const firstSignals = files.find((e) => e.preview?.signals)?.preview?.signals;
       const newDevice = await devicesApi.createDevice({
         serial_number: `BMS-${Date.now().toString(36).toUpperCase()}`,
-        pack_name: name || humanizeFilename(f.name),
+        pack_name: name || humanizeFilename(files[0].file.name),
         chemistry: 'Li-ion',
-        cell_count: signals?.cellCount || 16,
-        thermistor_count: signals?.thermistorCount || 4,
+        cell_count: firstSignals?.cellCount || 16,
+        thermistor_count: firstSignals?.thermistorCount || 4,
         connection_type: 'SIMULATED',
       });
-      await telemetryApi.importCsv(newDevice.id, f);
+      for (const entry of files) {
+        setUploadingFileId(entry.id);
+        await telemetryApi.importCsv(newDevice.id, entry.file);
+      }
+      setUploadingFileId(null);
       return newDevice;
     },
     onSuccess: (newDevice) => {
       navigate(`/app/devices/${newDevice.id}/findings`);
     },
     onError: (err) => {
-      setMessage({ type: 'error', text: err.response?.data?.detail || err.message || 'Failed to create a battery from this file' });
+      setUploadingFileId(null);
+      setMessage({ type: 'error', text: err.response?.data?.detail || err.message || 'Failed to create a battery from these files' });
     },
   });
 
-  const isSubmitting = isNewBatteryMode ? createMutation.isLoading : backfillMutation.isLoading;
-
   const handleSubmit = () => {
-    if (!file) return;
-    if (isNewBatteryMode) {
-      createMutation.mutate({ f: file, name: packName, signals: preview?.signals });
-    } else {
-      backfillMutation.mutate(file);
-    }
+    if (includedFiles.length === 0) return;
+    createMutation.mutate({ files: includedFiles, name: packName });
   };
 
   return (
@@ -157,42 +188,38 @@ export default function DataIngestion() {
       <div style={{ marginBottom: '1.5rem' }}>
         <h2 style={{ fontSize: '1.5rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <Upload size={24} color="var(--accent-primary)" />
-          {isNewBatteryMode ? 'Upload & Analyze' : 'Historical Data Ingestion'}
+          Upload &amp; Analyze
         </h2>
         <div style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginTop: '0.25rem' }}>
-          {isNewBatteryMode
-            ? 'Upload a BMS CSV log to register a new battery and instantly generate its analytics report — no setup required.'
-            : `Upload CSV files to backfill historical telemetry for ${device?.pack_name || 'this device'} (SN: ${device?.serial_number || ''})`}
+          Upload one or more BMS CSV logs to register a new battery and instantly generate its analytics report — no setup required.
         </div>
       </div>
 
       <div style={{ maxWidth: '680px', margin: '0 auto' }}>
-        {isNewBatteryMode && (
-          <div className="card" style={{ marginBottom: '1.5rem' }}>
-            <div className="card-title" style={{ marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-              <Sparkles size={16} color="var(--accent-primary)" /> Try a sample dataset
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.75rem' }}>
-              {SAMPLE_DATASETS.map((s) => (
-                <button
-                  key={s.file}
-                  type="button"
-                  onClick={() => loadSample(s)}
-                  disabled={isSubmitting}
-                  style={{
-                    textAlign: 'left', padding: '0.85rem', background: 'var(--bg-secondary)', border: '1px solid var(--border-default)',
-                    borderRadius: 'var(--radius-md)', cursor: isSubmitting ? 'default' : 'pointer', transition: 'border-color 0.15s',
-                  }}
-                  onMouseEnter={(e) => { if (!isSubmitting) e.currentTarget.style.borderColor = 'var(--accent-primary)'; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--border-default)'; }}
-                >
-                  <div style={{ fontWeight: 600, fontSize: '0.85rem', color: 'var(--text-primary)', marginBottom: '0.2rem' }}>{s.label}</div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{s.desc}</div>
-                </button>
-              ))}
-            </div>
+        <div className="card" style={{ marginBottom: '1.5rem' }}>
+          <div className="card-title" style={{ marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+            <Sparkles size={16} color="var(--accent-primary)" /> Try a sample dataset
           </div>
-        )}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.75rem' }}>
+            {SAMPLE_DATASETS.map((s) => (
+              <button
+                key={s.file}
+                type="button"
+                onClick={() => loadSample(s)}
+                disabled={createMutation.isPending}
+                style={{
+                  textAlign: 'left', padding: '0.85rem', background: 'var(--bg-secondary)', border: '1px solid var(--border-default)',
+                  borderRadius: 'var(--radius-md)', cursor: createMutation.isPending ? 'default' : 'pointer', transition: 'border-color 0.15s',
+                }}
+                onMouseEnter={(e) => { if (!createMutation.isPending) e.currentTarget.style.borderColor = 'var(--accent-primary)'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--border-default)'; }}
+              >
+                <div style={{ fontWeight: 600, fontSize: '0.85rem', color: 'var(--text-primary)', marginBottom: '0.2rem' }}>{s.label}</div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{s.desc}</div>
+              </button>
+            ))}
+          </div>
+        </div>
 
         <div className="card" style={{ textAlign: 'center', padding: '2.5rem 2rem' }}>
           <div
@@ -207,47 +234,110 @@ export default function DataIngestion() {
             onDragLeave={() => setDragOver(false)}
             onDrop={handleDrop}
           >
-            <input id="csv-upload" type="file" accept=".csv" style={{ display: 'none' }} onChange={handleFileChange} />
-            {file ? (
-              <div>
-                <FileText size={40} color="var(--accent-primary)" style={{ margin: '0 auto 0.75rem' }} />
-                <div style={{ fontWeight: 600, color: 'var(--text-primary)', marginBottom: '0.25rem' }}>{file.name}</div>
-                <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>{(file.size / 1024).toFixed(0)} KB</div>
-                <button
-                  type="button"
-                  onClick={(e) => { e.stopPropagation(); clearFile(); }}
-                  style={{ marginTop: '0.75rem', background: 'transparent', border: 'none', color: 'var(--text-muted)', fontSize: '0.75rem', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}
-                >
-                  <X size={12} /> Choose a different file
-                </button>
-              </div>
-            ) : (
-              <div>
-                <Upload size={40} color="var(--text-muted)" style={{ margin: '0 auto 0.75rem' }} />
-                <div style={{ fontWeight: 600, color: 'var(--text-primary)', marginBottom: '0.25rem' }}>Drag &amp; drop a CSV file, or click to select</div>
-                <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Standard BMS telemetry format — see below</div>
-              </div>
-            )}
+            <input id="csv-upload" type="file" accept=".csv" multiple style={{ display: 'none' }} onChange={handleFileChange} />
+            <Upload size={40} color="var(--text-muted)" style={{ margin: '0 auto 0.75rem' }} />
+            <div style={{ fontWeight: 600, color: 'var(--text-primary)', marginBottom: '0.25rem' }}>
+              Drag &amp; drop CSV file(s), or click to select
+            </div>
+            <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+              You can add multiple CSVs — each is imported into the same battery, like a real telemetry log arriving in batches.
+            </div>
           </div>
 
-          {preview && (
-            <div style={{ textAlign: 'left', background: 'var(--bg-secondary)', border: '1px solid var(--border-light)', borderRadius: 'var(--radius-md)', padding: '1rem', marginBottom: '1.25rem' }}>
-              <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '0.6rem' }}>
-                Detected {preview.rowCount.toLocaleString()}{preview.rowCount >= 2000 ? '+' : ''} rows
+          {batch.length > 0 && (
+            <div style={{ textAlign: 'left', marginBottom: '1.25rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.6rem' }}>
+                <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+                  {batch.length} file{batch.length > 1 ? 's' : ''} added — {includedFiles.length} will be imported
+                </div>
+                <button
+                  type="button"
+                  onClick={clearAll}
+                  disabled={createMutation.isPending}
+                  style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', fontSize: '0.75rem', cursor: 'pointer' }}
+                >
+                  Clear all
+                </button>
               </div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
-                <SignalBadge ok={preview.signals.voltage} label="Voltage" />
-                <SignalBadge ok={preview.signals.current} label="Current" />
-                <SignalBadge ok={preview.signals.soc} label="SOC" />
-                <SignalBadge ok={preview.signals.soh} label="SOH" />
-                <SignalBadge ok={preview.signals.cycle} label="Cycle number" />
-                <SignalBadge ok={preview.signals.hasCellVoltage} label={`${preview.signals.cellCount} cells (voltage)`} />
-                <SignalBadge ok={preview.signals.hasCellTemp} label={`${preview.signals.thermistorCount} thermistors`} />
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                {batch.map((entry) => {
+                  const isUploading = uploadingFileId === entry.id;
+                  const isActive = activeId === entry.id;
+                  return (
+                    <div
+                      key={entry.id}
+                      style={{
+                        border: `1px solid ${isActive ? 'var(--accent-primary)' : 'var(--border-light)'}`,
+                        borderRadius: 'var(--radius-md)', background: 'var(--bg-secondary)', padding: '0.75rem',
+                        opacity: entry.included ? 1 : 0.55, transition: 'opacity 0.15s, border-color 0.15s',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                        <FileText size={18} color={isUploading ? 'var(--accent-primary)' : 'var(--text-muted)'} style={{ flexShrink: 0 }} />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontWeight: 600, fontSize: '0.85rem', color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {entry.name}
+                            {isUploading && <span style={{ marginLeft: '0.5rem', fontWeight: 500, color: 'var(--accent-primary)' }}>uploading…</span>}
+                          </div>
+                          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                            {(entry.size / 1024).toFixed(0)} KB
+                            {entry.preview ? ` · ${entry.preview.rowCount.toLocaleString()}${entry.preview.rowCount >= 2000 ? '+' : ''} rows` : ' · parsing…'}
+                          </div>
+                        </div>
+                        <label
+                          title={entry.included ? 'Included in import' : 'Excluded from import'}
+                          style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.72rem', color: 'var(--text-muted)', cursor: 'pointer', flexShrink: 0 }}
+                        >
+                          <input type="checkbox" checked={entry.included} onChange={() => toggleIncluded(entry.id)} disabled={createMutation.isPending} />
+                          Include
+                        </label>
+                        <button
+                          type="button"
+                          title={entry.expanded ? 'Hide details' : 'View details'}
+                          onClick={() => toggleExpanded(entry.id)}
+                          style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '0.25rem', flexShrink: 0 }}
+                        >
+                          {entry.expanded ? <EyeOff size={16} /> : <Eye size={16} />}
+                        </button>
+                        <button
+                          type="button"
+                          title="Remove file"
+                          onClick={() => removeFile(entry.id)}
+                          disabled={createMutation.isPending}
+                          style={{ background: 'transparent', border: 'none', color: 'var(--danger)', cursor: 'pointer', padding: '0.25rem', flexShrink: 0 }}
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+
+                      {entry.expanded && (
+                        <div style={{ marginTop: '0.65rem', paddingTop: '0.65rem', borderTop: '1px solid var(--border-light)' }}>
+                          {entry.preview?.error ? (
+                            <div style={{ fontSize: '0.75rem', color: 'var(--danger)' }}>Couldn't parse this file as CSV.</div>
+                          ) : entry.preview?.signals ? (
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
+                              <SignalBadge ok={entry.preview.signals.voltage} label="Voltage" />
+                              <SignalBadge ok={entry.preview.signals.current} label="Current" />
+                              <SignalBadge ok={entry.preview.signals.soc} label="SOC" />
+                              <SignalBadge ok={entry.preview.signals.soh} label="SOH" />
+                              <SignalBadge ok={entry.preview.signals.cycle} label="Cycle number" />
+                              <SignalBadge ok={entry.preview.signals.hasCellVoltage} label={`${entry.preview.signals.cellCount} cells (voltage)`} />
+                              <SignalBadge ok={entry.preview.signals.hasCellTemp} label={`${entry.preview.signals.thermistorCount} thermistors`} />
+                            </div>
+                          ) : (
+                            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Parsing…</div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
 
-          {isNewBatteryMode && file && (
+          {batch.length > 0 && (
             <div className="form-group" style={{ textAlign: 'left', marginBottom: '1.25rem' }}>
               <label className="form-label">Battery / Pack Name</label>
               <input type="text" className="form-input" value={packName} onChange={(e) => setPackName(e.target.value)} placeholder="e.g. Warehouse Forklift Pack A" />
@@ -264,12 +354,12 @@ export default function DataIngestion() {
           <button
             className="btn-primary"
             style={{ width: '100%', padding: '1rem', fontSize: '1rem' }}
-            disabled={!file || isSubmitting}
+            disabled={includedFiles.length === 0 || createMutation.isPending}
             onClick={handleSubmit}
           >
-            {isSubmitting
-              ? (isNewBatteryMode ? 'Creating & analyzing…' : 'Uploading…')
-              : (isNewBatteryMode ? 'Create Battery & Analyze' : 'Start Import')}
+            {createMutation.isPending
+              ? 'Creating & analyzing…'
+              : `Create Battery & Analyze${includedFiles.length > 1 ? ` (${includedFiles.length} files)` : ''}`}
           </button>
 
           <div style={{ marginTop: '2rem', textAlign: 'left', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>

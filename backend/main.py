@@ -35,6 +35,18 @@ async def lifespan(app: FastAPI):
     # Ensure tables exist (we rely on seed.py for initial data, but create_all is safe)
     Base.metadata.create_all(bind=engine)
     
+    # Auto-seed the database if it's completely empty (e.g. fresh Render deploy)
+    from database import SessionLocal
+    from models import User
+    import seed
+    db = SessionLocal()
+    try:
+        if db.query(User).count() == 0:
+            seed.seed_database()
+    finally:
+        db.close()
+        
+
     if settings.SIMULATOR_ENABLED:
         await start_simulator(tick_seconds=settings.SIMULATOR_TICK_SECONDS)
     

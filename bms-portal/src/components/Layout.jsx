@@ -115,7 +115,7 @@ export default function Layout() {
     if (newId) {
       // Keep current tab, just change device
       const currentTab = location.pathname.split('/').pop();
-      const validTabs = ['realtime', 'history', 'cells', 'location', 'degradation', 'quality', 'thermal', 'alerts', 'reports', 'upload'];
+      const validTabs = ['realtime', 'history', 'cells', 'location', 'degradation', 'quality', 'thermal', 'alerts', 'reports'];
       const targetTab = validTabs.includes(currentTab) ? currentTab : 'realtime';
       navigate(`/app/devices/${newId}/${targetTab}`);
     } else if (isAdmin) {
@@ -179,7 +179,10 @@ export default function Layout() {
               value={selectedDeviceId}
               onChange={handleDeviceChange}
               placeholder="Select a device..."
-              options={devices.map(d => ({ value: String(d.id), label: `${d.serial_number} - ${d.pack_name}` }))}
+              options={[
+                ...(isAdmin && selectedDeviceId ? [{ value: '', label: '— Select battery —' }] : []),
+                ...devices.map(d => ({ value: String(d.id), label: `${d.serial_number} - ${d.pack_name}` })),
+              ]}
             />
           </div>
 
@@ -214,11 +217,6 @@ export default function Layout() {
               </NavLink>
 
               <div className="sidebar-section-label">Tools</div>
-              {isAdmin && (
-                <NavLink to={`/app/devices/${selectedDeviceId}/upload`} className={({isActive}) => `sidebar-nav-item ${isActive ? 'active' : ''}`} onClick={() => setSidebarOpen(false)}>
-                  <Upload size={18} /> Data Ingestion
-                </NavLink>
-              )}
               <NavLink to={`/app/devices/${selectedDeviceId}/reports`} className={({isActive}) => `sidebar-nav-item ${isActive ? 'active' : ''}`} onClick={() => setSidebarOpen(false)}>
                 <FileText size={18} /> Reports
               </NavLink>
