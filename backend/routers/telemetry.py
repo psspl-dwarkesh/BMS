@@ -9,9 +9,8 @@ from sqlalchemy.orm import Session, joinedload
 import pandas as pd
 
 from database import get_db
-from models import CellReading, Telemetry, TelemetrySource, User
+from models import CellReading, Device, Telemetry, TelemetrySource, User
 from routers import get_current_user, get_scoped_device, require_admin
-from ingestion import ingest_telemetry_row
 from ws_manager import manager
 
 router = APIRouter(prefix="/api/v1/devices/{device_id}/telemetry", tags=["telemetry"])
@@ -197,15 +196,27 @@ def export_history_csv(
 
 
 def _process_import_in_background(device_id: int, df_json: str):
-    """Background task to run the CSV import through the same pipeline as the simulator."""
+    """
+    Background task to bulk-import a CSV's rows as historical telemetry.
+
+    Writes are batched (BATCH_SIZE rows per flush/commit), not one row at a
+    time: the straightforward per-row approach (call the same
+    ingest_telemetry_row() the live simulator uses, once per row, committing
+    each time) made a several-hundred-row import take minutes against a
+    remote DB like Neon - each commit, and each of ingest_telemetry_row's
+    per-cell alert-threshold checks, is its own network round trip. A
+    historical backfill doesn't need real-time alerting per row anyway (that
+    row-by-row alert state machine is for live data), so this bypasses
+    ingest_telemetry_row entirely and does its own batched inserts instead.
+    """
     db: Session = next(get_db())
     try:
         device = db.query(Device).filter(Device.id == device_id).first()
         if not device:
             return
-            
+
         df = pd.read_json(io.StringIO(df_json), orient="records")
-        
+
         # Try to find columns
         cols = df.columns
         time_col = next((c for c in cols if 'time' in c.lower() or 'date' in c.lower()), None)
@@ -216,7 +227,33 @@ def _process_import_in_background(device_id: int, df_json: str):
         
         cell_v_cols = [c for c in cols if 'cell' in c.lower() and 'volt' in c.lower()]
         cell_t_cols = [c for c in cols if 'cell' in c.lower() and 'temp' in c.lower() or 'therm' in c.lower()]
-        
+
+        BATCH_SIZE = 200
+        pending: list[tuple[Telemetry, list[dict]]] = []
+        rows_written = 0
+
+        def flush_batch():
+            nonlocal rows_written
+            if not pending:
+                return
+            db.add_all([t for t, _ in pending])
+            db.flush()  # one batched round-trip; populates .id on every Telemetry object
+            cell_rows = []
+            for t, cells in pending:
+                for cr in cells:
+                    cell_rows.append(CellReading(
+                        telemetry_id=t.id,
+                        cell_number=cr["cell_number"],
+                        voltage_mv=cr.get("voltage_mv"),
+                        temperature_c=cr.get("temperature_c"),
+                    ))
+            if cell_rows:
+                db.add_all(cell_rows)
+                db.flush()
+            db.commit()
+            rows_written += len(pending)
+            pending.clear()
+
         # Limit to 1000 rows for safety in this demo
         for idx, row in df.head(1000).iterrows():
             sample_time = datetime.datetime.utcnow()
@@ -269,12 +306,21 @@ def _process_import_in_background(device_id: int, df_json: str):
                     fields["min_thermistor_temp"] = min(t_vals)
                     fields["avg_cell_temp"] = sum(t_vals) / len(t_vals)
             
-            # Ingest
-            trow, new_alerts, res_alerts = ingest_telemetry_row(
-                db, device, sample_time, fields, cell_readings_data, TelemetrySource.csv_import
+            trow = Telemetry(
+                device_id=device.id,
+                sample_time=sample_time,
+                source=TelemetrySource.csv_import,
+                **fields,
             )
-            db.commit()
-            
+            pending.append((trow, cell_readings_data))
+            if len(pending) >= BATCH_SIZE:
+                flush_batch()
+
+        flush_batch()  # final partial batch
+        device.last_seen_at = datetime.datetime.utcnow()
+        db.commit()
+        print(f"CSV import for device {device_id}: {rows_written} rows written.")
+
     except Exception as e:
         print(f"Error importing CSV: {e}")
         db.rollback()

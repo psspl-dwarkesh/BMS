@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Globe, ShieldAlert, Battery, Search, Server, Filter, CheckCircle2, AlertTriangle, Cpu } from 'lucide-react';
+import { Globe, ShieldAlert, Battery, Search, Server, Filter, CheckCircle2, AlertTriangle, Cpu, Upload } from 'lucide-react';
 import { devicesApi } from '../api/endpoints';
 import { LoadingState, ErrorState } from './common/StateViews';
 
@@ -63,7 +63,7 @@ export default function FleetDashboard() {
               </h2>
               <p style={{ color: 'var(--text-secondary)' }}>Live telemetry for {stats.total} registered battery packs.</p>
             </div>
-            <div style={{ display: 'flex', gap: '1rem' }}>
+            <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
               <div style={{ background: 'var(--bg-panel)', padding: '0.75rem 1.25rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-light)', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                 <Server size={18} color="var(--success)" />
                 <div>
@@ -71,6 +71,9 @@ export default function FleetDashboard() {
                   <div style={{ fontWeight: '600', fontSize: '0.9rem' }}>Live Connection</div>
                 </div>
               </div>
+              <button className="btn-primary" onClick={() => navigate('/app/upload')} style={{ padding: '0.75rem 1.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <Upload size={16} /> Upload &amp; Analyze
+              </button>
             </div>
           </div>
 
