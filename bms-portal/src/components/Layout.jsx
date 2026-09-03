@@ -7,6 +7,8 @@ import DataIngestion from './DataIngestion';
 import ReportGenerator from './ReportGenerator';
 import DataQuality from './DataQuality';
 import DegradationAnalysis from './DegradationAnalysis';
+import ThermalAnalysis from './ThermalAnalysis';
+import AutomatedFindings from './AutomatedFindings';
 import FleetDashboard from './FleetDashboard';
 
 export default function Layout({ user, analyticsData, onDataProcessed, onUpdateDatasets, onBackToLanding }) {
@@ -97,6 +99,7 @@ export default function Layout({ user, analyticsData, onDataProcessed, onUpdateD
     { id: 'degradation', label: 'Degradation', icon: <Activity size={18} /> },
     { id: 'thermal', label: 'Thermal', icon: <Thermometer size={18} /> },
     { id: 'alerts', label: 'Alerts', icon: <AlertTriangle size={18} /> },
+    { id: 'findings', label: 'Findings & Outputs', icon: <FileText size={18} /> },
   ];
 
   const isViewer = user?.role === 'Viewer';
@@ -113,6 +116,7 @@ export default function Layout({ user, analyticsData, onDataProcessed, onUpdateD
     degradation: 'Degradation Analysis',
     thermal: 'Thermal Analysis',
     alerts: 'Alerts & Anomalies',
+    findings: 'Automated Findings & Outputs',
     upload: 'Data Ingestion',
     reports: 'Report Generation',
   };
@@ -180,41 +184,11 @@ export default function Layout({ user, analyticsData, onDataProcessed, onUpdateD
       
       case 'degradation': return <DegradationAnalysis data={analyticsData} />;
       
-      case 'thermal':
-        return (
-          <div className="animate-fade-in">
-            <div className="card" style={{ marginBottom: '1.5rem' }}>
-              <div className="card-header">
-                <div>
-                  <div className="card-title">Thermal Profile</div>
-                  <div className="card-subtitle">Temperature behavior analysis</div>
-                </div>
-                {analyticsData && (
-                  <span className={`badge ${analyticsData.kpis.pack.maxTemp > 45 ? 'badge-danger' : 'badge-success'}`}>
-                    {analyticsData.kpis.pack.maxTemp > 45 ? 'Over-Temperature' : 'Normal'}
-                  </span>
-                )}
-              </div>
-              {analyticsData && (
-                <div className="dashboard-grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
-                  <div className="card">
-                    <div className="stat-label"><Thermometer size={14} color="var(--danger)" /> Max Temp</div>
-                    <div className="stat-value">{analyticsData.kpis.pack.maxTemp.toFixed(1)}<span className="stat-unit">°C</span></div>
-                  </div>
-                  <div className="card">
-                    <div className="stat-label"><Thermometer size={14} color="var(--info)" /> Min Temp</div>
-                    <div className="stat-value">{analyticsData.kpis.pack.minTemp.toFixed(1)}<span className="stat-unit">°C</span></div>
-                  </div>
-                  <div className="card">
-                    <div className="stat-label"><Thermometer size={14} color="var(--warning)" /> Avg Temp</div>
-                    <div className="stat-value">{analyticsData.kpis.pack.avgTemp.toFixed(1)}<span className="stat-unit">°C</span></div>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        );
-      case 'alerts':
+      case 'thermal': return <ThermalAnalysis data={analyticsData} />;
+      case 'findings': return <AutomatedFindings data={analyticsData} />;
+      case 'alerts': {
+        const fullAnomalies = analyticsData?.allAnomalies || analyticsData?.anomalies || [];
+        const totalCount = analyticsData?.anomalySummary?.total ?? fullAnomalies.length;
         return (
           <div className="animate-fade-in">
             <div className="card">
@@ -223,9 +197,15 @@ export default function Layout({ user, analyticsData, onDataProcessed, onUpdateD
                   <div className="card-title">Detected Anomalies</div>
                   <div className="card-subtitle">System-generated alerts from analytics engine</div>
                 </div>
-                {analyticsData && <span className="badge badge-neutral">{analyticsData.anomalies.length} alerts</span>}
+                {analyticsData && (
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    {analyticsData.anomalySummary?.critical > 0 && <span className="badge badge-danger">{analyticsData.anomalySummary.critical} critical</span>}
+                    {analyticsData.anomalySummary?.warning > 0 && <span className="badge badge-warning">{analyticsData.anomalySummary.warning} warning</span>}
+                    <span className="badge badge-neutral">{totalCount} total</span>
+                  </div>
+                )}
               </div>
-              {analyticsData && analyticsData.anomalies.length > 0 ? (
+              {analyticsData && fullAnomalies.length > 0 ? (
                 <div style={{ overflowX: 'auto' }}>
                   <table className="data-table">
                     <thead>
@@ -238,7 +218,7 @@ export default function Layout({ user, analyticsData, onDataProcessed, onUpdateD
                       </tr>
                     </thead>
                     <tbody>
-                      {analyticsData.anomalies.map((a, idx) => (
+                      {fullAnomalies.map((a, idx) => (
                         <tr key={idx}>
                           <td style={{ color: 'var(--text-secondary)' }}>{a.timestamp}</td>
                           <td><span className={`badge badge-${a.severity === 'Critical' ? 'danger' : 'warning'}`}>{a.severity}</span></td>
@@ -260,6 +240,7 @@ export default function Layout({ user, analyticsData, onDataProcessed, onUpdateD
             </div>
           </div>
         );
+      }
       default: return null;
     }
   };

@@ -311,7 +311,7 @@ export default function Dashboard({ data }) {
         <div className="card" style={{ marginTop: '1.5rem' }}>
           <div className="card-header">
             <div className="card-title">Recent Alerts</div>
-            <span className="badge badge-danger">{anomalies.length} anomalies</span>
+            <span className="badge badge-danger">{data.anomalySummary?.total ?? anomalies.length} anomalies</span>
           </div>
           <div style={{ overflowX: 'auto' }}>
             <table className="data-table">

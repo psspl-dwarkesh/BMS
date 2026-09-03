@@ -1,8 +1,8 @@
 # BMS Battery Analytics — Project Requirements
 
 > **Version:** 1.0  
-> **Status:** MVP Development  
-> **Last Updated:** 2026-09-02
+> **Status:** MVP Complete  
+> **Last Updated:** 2026-09-03
 
 ---
 
@@ -103,9 +103,11 @@ The solution demonstrates how a battery analytics layer can integrate with an ex
 - [x] Thermal Analysis
 - [x] Anomaly Detection
 - [x] Interactive Dashboard
-- [ ] Degradation Analysis (SOH Estimation)
-- [ ] Exportable Analytics Report
-- [ ] Architecture Deployment Diagram
+- [x] Degradation Analysis (SOH Estimation)
+- [x] Exportable Analytics Report
+- [x] Architecture Deployment Diagram
+- [x] Automated Findings Report (Key Findings, Data Quality tier)
+- [x] Analytics Outputs → Vehicle-Control Mapping
 
 ---
 

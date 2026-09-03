@@ -35,14 +35,22 @@ export default function DegradationAnalysis({ data }) {
   const currentCap = lastPoint?.capacity ?? 50;
   const capFade = ((initialCap - currentCap) / initialCap) * 100;
 
-  // True only when every point was read straight from CSV capacity/SOH/cycle
-  // columns. If any point had to be modeled via Coulomb-counting/EKF because
-  // that signal wasn't in the source data, the whole series is marked as an estimate.
-  const seriesIsEstimate = degradationSeries.some(p => p.isEstimate);
+  // SOH and Capacity each have their own estimate/measured basis - a CSV can
+  // easily carry a real SOH column but no Capacity column (or vice versa), so
+  // treating "any signal missing" as "the whole series is an estimate" would
+  // mislabel a genuinely measured SOH curve as modeled just because Capacity
+  // wasn't logged. Track and message each one on its own terms.
+  const sohIsEstimate = !!lastPoint?.sohIsEstimate;
+  const capacityIsEstimate = !!lastPoint?.capacityIsEstimate;
+  const seriesIsEstimate = sohIsEstimate || capacityIsEstimate;
+  const estimatedMetrics = [
+    sohIsEstimate && 'SOH',
+    capacityIsEstimate && 'Capacity'
+  ].filter(Boolean);
   const missingSignals = [
     lastPoint?.cycleIsEstimate && 'Cycle Number',
-    lastPoint?.capacityIsEstimate && 'Capacity',
-    lastPoint?.sohIsEstimate && 'SOH'
+    capacityIsEstimate && 'Capacity',
+    sohIsEstimate && 'SOH'
   ].filter(Boolean);
 
   return (
@@ -51,7 +59,9 @@ export default function DegradationAnalysis({ data }) {
         <div className="card" style={{ marginBottom: '1.5rem', background: 'var(--warning-bg)', border: '1px solid var(--warning)', display: 'flex', alignItems: 'flex-start', gap: '0.75rem', padding: '1rem 1.25rem' }}>
           <FlaskConical size={18} color="var(--warning)" style={{ flexShrink: 0, marginTop: '0.1rem' }} />
           <div style={{ fontSize: '0.85rem', color: 'var(--text-primary)' }}>
-            <strong>Modeled estimate, not a measurement.</strong> The source CSV has no {missingSignals.join(', ')} column{missingSignals.length > 1 ? 's' : ''}, so SOH/Capacity below are derived from Coulomb-counting throughput fed through an EKF assuming a 50Ah nominal pack capacity — not read from an actual health sensor or lab test.
+            <strong>{estimatedMetrics.join(' and ')} {estimatedMetrics.length > 1 ? 'are' : 'is'} a modeled estimate, not a measurement.</strong> The source CSV has no {missingSignals.join(', ')} column{missingSignals.length > 1 ? 's' : ''}, so {estimatedMetrics.join('/')} {estimatedMetrics.length > 1 ? 'are' : 'is'} derived from Coulomb-counting throughput fed through an EKF assuming a 50Ah nominal pack capacity — not read from an actual health sensor or lab test.
+            {!sohIsEstimate && capacityIsEstimate && ' SOH above is read directly from the CSV and is not affected by this.'}
+            {sohIsEstimate && !capacityIsEstimate && ' Capacity above is read directly from the CSV and is not affected by this.'}
           </div>
         </div>
       )}
@@ -77,13 +87,13 @@ export default function DegradationAnalysis({ data }) {
           <div>
             <div className="card-title">State of Health (SOH) Projection</div>
             <div className="card-subtitle">
-              {seriesIsEstimate
-                ? 'Estimated SOH decline over operating cycles, modeled from Ah integration (no SOH/capacity log in source data)'
+              {sohIsEstimate
+                ? 'Estimated SOH decline over operating cycles, modeled from Ah integration (no SOH column in source data)'
                 : 'SOH decline over operating cycles, read from the source CSV'}
             </div>
           </div>
-          <span className={`badge ${seriesIsEstimate ? 'badge-warning' : 'badge-success'}`}>
-            {seriesIsEstimate ? 'Estimated (EKF model)' : 'Measured (from CSV)'}
+          <span className={`badge ${sohIsEstimate ? 'badge-warning' : 'badge-success'}`}>
+            {sohIsEstimate ? 'Estimated (EKF model)' : 'Measured (from CSV)'}
           </span>
         </div>
         <div style={{ height: '300px', width: '100%' }}>
@@ -109,7 +119,7 @@ export default function DegradationAnalysis({ data }) {
         <div className="card-header">
           <div>
             <div className="card-title">Capacity Fade Curve</div>
-            <div className="card-subtitle">{seriesIsEstimate ? 'Estimated' : 'Measured'} remaining Ah capacity over cycles</div>
+            <div className="card-subtitle">{capacityIsEstimate ? 'Estimated' : 'Measured'} remaining Ah capacity over cycles</div>
           </div>
         </div>
         <div style={{ height: '250px', width: '100%' }}>

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ArrowLeft, BookOpen, Terminal, Database, Shield, Zap, Search } from 'lucide-react';
+import { ArrowLeft, BookOpen, Terminal, Database, Shield, Zap, Search, Link2 } from 'lucide-react';
 import '../docs.css';
 
 const DOC_TOPICS = [
@@ -7,8 +7,44 @@ const DOC_TOPICS = [
   { id: 'quickstart', label: 'Quick Start', icon: <Terminal size={16} /> },
   { id: 'architecture', label: 'Architecture & Workflow', icon: <Database size={16} /> },
   { id: 'data-format', label: 'CSV Data Format', icon: <Database size={16} /> },
+  { id: 'outputs', label: 'Outputs → Vehicle Control', icon: <Link2 size={16} /> },
   { id: 'security', label: 'Security & Roles', icon: <Shield size={16} /> },
 ];
+
+// A single labeled box for the deployment-architecture diagrams below.
+const DiagBox = ({ title, subtitle, accent }) => (
+  <div style={{
+    border: `1.5px solid ${accent || 'var(--border-strong)'}`,
+    borderRadius: 'var(--radius-md)',
+    padding: '0.85rem 1rem',
+    minWidth: '130px',
+    textAlign: 'center',
+    background: 'var(--bg-primary)',
+    flexShrink: 0
+  }}>
+    <div style={{ fontWeight: 600, fontSize: '0.8rem', color: 'var(--text-primary)' }}>{title}</div>
+    {subtitle && <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>{subtitle}</div>}
+  </div>
+);
+
+const DiagArrow = ({ vertical }) => (
+  <div style={{
+    color: 'var(--accent-primary)', fontSize: '1.1rem', fontWeight: 700, flexShrink: 0,
+    padding: vertical ? '0.15rem 0' : '0 0.4rem'
+  }}>
+    {vertical ? '↓' : '→'}
+  </div>
+);
+
+const DeploymentDiagram = ({ title, description, children }) => (
+  <div className="card" style={{ marginBottom: '1.25rem', background: 'var(--bg-secondary)' }}>
+    <div className="card-title" style={{ fontSize: '0.9rem', marginBottom: '0.35rem' }}>{title}</div>
+    <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>{description}</p>
+    <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '0.25rem', justifyContent: 'center', padding: '0.5rem 0' }}>
+      {children}
+    </div>
+  </div>
+);
 
 export default function Documentation({ onBack }) {
   const [activeTopic, setActiveTopic] = useState('intro');
@@ -50,7 +86,7 @@ export default function Documentation({ onBack }) {
             <p>Once data is loaded, navigate through the sidebar to view:</p>
             <ul>
               <li><strong>Dashboard:</strong> High-level KPIs and circular gauges for Pack SOC and Temperature.</li>
-              <li><strong>Cell Analysis:</strong> A 96-cell heatmap highlighting voltage deviations and imbalances.</li>
+              <li><strong>Cell Analysis:</strong> An interactive 3D pack viewer and voltage/temperature distribution charts, sized to however many per-cell columns your CSV actually provides.</li>
               <li><strong>Reports:</strong> Compile your findings into a downloadable PDF document.</li>
             </ul>
           </div>
@@ -100,12 +136,44 @@ BMS / Calibration / Vehicle-Control Evaluation`}</pre>
             </div>
 
             <h2>Deployment Architectures</h2>
-            <p>The analytics models can be deployed in three distinct configurations depending on latency and storage requirements:</p>
-            <ul>
-              <li><strong>On-Board Analytics:</strong> `Battery → BMS → Analytics Model → Vehicle Control`. Processes data locally for low-latency outputs for vehicle-level decisions.</li>
-              <li><strong>Cloud Analytics:</strong> Suitable for fleet monitoring and long-term degradation analysis.</li>
-              <li><strong>Hybrid Architecture:</strong> Edge compute handles critical anomaly detection, while the cloud processes historical degradation and SOH prediction.</li>
-            </ul>
+            <p>The analytics models can be deployed in three distinct configurations depending on latency and storage requirements. This MVP demonstrates the analytics logic using uploaded CSVs (equivalent to the On-Board path, running in-browser); the same processing could run unchanged in any of the three configurations below.</p>
+
+            <DeploymentDiagram
+              title="On-Board Analytics"
+              description="Processes data locally on the vehicle for low-latency outputs feeding vehicle-level decisions directly."
+            >
+              <DiagBox title="Battery" />
+              <DiagArrow />
+              <DiagBox title="BMS" />
+              <DiagArrow />
+              <DiagBox title="Analytics Model" subtitle="on-board compute" accent="var(--accent-primary)" />
+              <DiagArrow />
+              <DiagBox title="Vehicle Control" />
+            </DeploymentDiagram>
+
+            <DeploymentDiagram
+              title="Cloud Analytics"
+              description="Suitable for fleet monitoring, long-term degradation analysis, and engineering investigations where latency is less critical."
+            >
+              <DiagBox title="Battery → BMS" subtitle="vehicle data" />
+              <DiagArrow />
+              <DiagBox title="Cloud" subtitle="Analytics Engine" accent="var(--accent-primary)" />
+              <DiagArrow />
+              <DiagBox title="Health / Degradation" />
+              <DiagArrow />
+              <DiagBox title="Engineering Dashboard" />
+            </DeploymentDiagram>
+
+            <DeploymentDiagram
+              title="Hybrid Architecture"
+              description="Edge compute handles time-critical anomaly detection on-board, while the cloud processes historical degradation, SOH prediction, and fleet-wide trends."
+            >
+              <DiagBox title="Battery → BMS" subtitle="vehicle data" />
+              <DiagArrow />
+              <DiagBox title="On-Board Analytics" subtitle="real-time" accent="var(--accent-primary)" />
+              <DiagArrow />
+              <DiagBox title="Cloud" subtitle="fleet & degradation monitoring" accent="var(--accent-primary)" />
+            </DeploymentDiagram>
           </div>
         );
       case 'data-format':
@@ -153,7 +221,40 @@ BMS / Calibration / Vehicle-Control Evaluation`}</pre>
             </table>
 
             <h2>Cell-Level Data (Optional)</h2>
-            <p>If your logs include individual cell voltages, name the columns <code>Cell1_Voltage</code>, <code>Cell2_Voltage</code>, etc. If omitted, the system will simulate a perfectly balanced 96-cell architecture based on the pack voltage.</p>
+            <p>If your logs include individual cell voltages, name the columns <code>Cell1_Voltage</code>, <code>Cell2_Voltage</code>, etc. — the portal reads whatever number of cell columns are actually present (not a fixed count). Per-cell temperatures follow the same pattern with <code>Cell1_Temp</code>, <code>Cell2_Temp</code>, etc. If these columns are omitted, cell-level views clearly report that no per-cell data is available rather than inventing balanced cell readings.</p>
+          </div>
+        );
+      case 'outputs':
+        return (
+          <div className="animate-fade-in">
+            <h1>Analytics Outputs → Vehicle-Control & Calibration</h1>
+            <p>Each analytics output below is a <strong>diagnostic/monitoring signal</strong> that could plausibly feed a BMS, vehicle-control, or calibration workflow. None of these outputs directly control the vehicle in this MVP — that requires a separate, validated control interface consuming them.</p>
+
+            <table className="doc-table">
+              <thead>
+                <tr>
+                  <th>Analytics Output</th>
+                  <th>Potential Vehicle-Control / Calibration Application</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td>SOC</td><td>Charging limit optimization, remaining-range estimation</td></tr>
+                <tr><td>SOH / Estimated Capacity</td><td>End-of-life prediction, preventive maintenance scheduling</td></tr>
+                <tr><td>Capacity Fade / Degradation Rate</td><td>BMS calibration, fleet health scoring</td></tr>
+                <tr><td>Cell Voltage Imbalance</td><td>Battery protection strategies, cell-balancing triggers</td></tr>
+                <tr><td>Cell Temperature Deviation</td><td>Thermal-management strategy, derating decisions</td></tr>
+                <tr><td>Thermal Condition (max/avg pack temp)</td><td>Discharge/power-limit decisions, cooling activation</td></tr>
+                <tr><td>Anomaly / Fault Indicators</td><td>Vehicle performance management, protection interlocks</td></tr>
+                <tr><td>Unusual Current Behavior</td><td>Discharge/power-limit decisions, load-shedding triggers</td></tr>
+                <tr><td>Battery Health Status (Healthy/Warning/Critical)</td><td>Fleet battery monitoring, dispatch prioritization</td></tr>
+              </tbody>
+            </table>
+
+            <div className="doc-note">
+              <strong>Note:</strong> The "Findings &amp; Outputs" tab in the portal shows this same mapping filtered to what the
+              currently loaded CSV actually supports — an output only shows as "Available" there when the required signal was
+              found in the source data.
+            </div>
           </div>
         );
       case 'security':
