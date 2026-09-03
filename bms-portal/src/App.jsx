@@ -92,7 +92,8 @@ function App() {
               <Route path="fleet/users" element={<RequireAuth adminOnly><UserManagement /></RequireAuth>} />
               <Route path="fleet/devices" element={<RequireAuth adminOnly><DeviceManagement /></RequireAuth>} />
               <Route path="fleet/alerts" element={<RequireAuth adminOnly><AlertsPage /></RequireAuth>} />
-              
+              <Route path="upload" element={<RequireAuth adminOnly><DataIngestion /></RequireAuth>} />
+
               {/* Device scoped routes */}
               <Route path="devices/:id/realtime" element={<DeviceRealtime />} />
               <Route path="devices/:id/history" element={<DeviceHistory />} />
@@ -114,7 +115,8 @@ function App() {
           </Routes>
         </Router>
       </AuthProvider>
-      <ReactQueryDevtools initialIsOpen={false} />
+      {/* Dev-only debugging aid - never rendered in a production build (Render, etc.) */}
+      {import.meta.env.DEV && <ReactQueryDevtools initialIsOpen={false} />}
     </QueryClientProvider>
   );
 }

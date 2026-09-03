@@ -166,6 +166,9 @@ export default function Layout() {
               <NavLink to="/app/fleet/devices" className={({isActive}) => `sidebar-nav-item ${isActive ? 'active' : ''}`} onClick={() => setSidebarOpen(false)}>
                 <Shield size={18} /> Device Registry
               </NavLink>
+              <NavLink to="/app/upload" className={({isActive}) => `sidebar-nav-item ${isActive ? 'active' : ''}`} onClick={() => setSidebarOpen(false)}>
+                <Upload size={18} /> Upload &amp; Analyze
+              </NavLink>
             </>
           )}
 

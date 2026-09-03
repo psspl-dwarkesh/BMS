@@ -20,5 +20,10 @@ export function useDeviceAnalytics(deviceId, { pageSize = 500 } = {}) {
       return processBatteryData(csvRows);
     },
     enabled: !!deviceId,
+    // A CSV import (or the very first simulator tick) finishes in a background
+    // task shortly after this page mounts, not before - poll briefly until
+    // real data shows up (rather than the page looking permanently broken
+    // right after "Create Battery & Analyze"), then stop.
+    refetchInterval: (query) => (query.state.data ? false : 2000),
   });
 }

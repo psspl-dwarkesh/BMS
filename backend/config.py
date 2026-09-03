@@ -42,7 +42,11 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite:///./bms_analytics.db"
 
     # ── Simulator ─────────────────────────────────────────────────────────────
-    SIMULATOR_ENABLED: bool = True
+    # Off by default - this is a CSV-upload-driven demo (see the "Upload &
+    # Analyze" flow), not a live-telemetry product. Still fully implemented
+    # and one env var away (SIMULATOR_ENABLED=True) if a live-mode demo is
+    # ever wanted later.
+    SIMULATOR_ENABLED: bool = False
     SIMULATOR_TICK_SECONDS: float = 5.0
 
 
