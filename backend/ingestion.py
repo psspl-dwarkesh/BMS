@@ -122,6 +122,7 @@ def ingest_telemetry_row(
     fields: dict[str, Any],
     cell_readings_data: list[dict],   # [{"cell_number": N, "voltage_mv": V, "temperature_c": T}]
     source: TelemetrySource = TelemetrySource.simulator,
+    check_alerts: bool = True,
 ) -> tuple[Telemetry, list[Alert], list[Alert]]:
     """
     Insert one Telemetry row + its CellReading rows, bump device.last_seen_at,
@@ -139,6 +140,16 @@ def ingest_telemetry_row(
     fields           : Dict of pack-level values (keys match Telemetry columns).
     cell_readings_data : List of per-cell dicts.
     source           : TelemetrySource enum value.
+    check_alerts     : Set False to skip threshold checks entirely (each check
+                       is its own `_open_alert` SELECT - up to ~35 queries per
+                       row across pack + all per-cell checks). Fine per-tick
+                       for the live simulator/real-device path (one row every
+                       few seconds), but a bulk historical import of hundreds
+                       of rows would multiply that into thousands of extra
+                       round trips - measured as minutes of extra latency
+                       against a remote DB (Neon) versus being near-instant
+                       against local SQLite. Bulk CSV import passes False;
+                       live ingestion leaves this at its default (True).
     """
     # ── 1. Build Telemetry row ─────────────────────────────────────────────
     trow = Telemetry(
@@ -180,6 +191,36 @@ def ingest_telemetry_row(
     device.last_seen_at = datetime.datetime.utcnow()
 
     # ── 4. Threshold checks ────────────────────────────────────────────────
+    if not check_alerts:
+        return trow, [], []
+
+    new_alerts, resolved_alerts = check_telemetry_thresholds(
+        db, device.id, trow.id, fields, cell_readings_data
+    )
+
+    # ── 5. Return — caller commits ─────────────────────────────────────────
+    return trow, new_alerts, resolved_alerts
+
+
+def check_telemetry_thresholds(
+    db: Session,
+    device_id: int,
+    telemetry_id: int,
+    fields: dict[str, Any],
+    cell_readings_data: list[dict],
+) -> tuple[list[Alert], list[Alert]]:
+    """
+    Run all pack- and cell-level threshold checks for one telemetry row and
+    open/resolve Alert rows accordingly (see module docstring for the
+    one-open-alert-per-type dedup rule). Split out of ingest_telemetry_row so
+    a bulk importer can run this just once, against only the most recent row,
+    after a fast batched insert of historical rows with check_alerts=False -
+    a CSV backfill's *history* doesn't need per-row alerting, but its
+    *current* state (the latest row) should still surface real alerts, same
+    as a live device would.
+
+    Does NOT commit - caller commits (same contract as ingest_telemetry_row).
+    """
     T = THRESHOLDS
     new_alerts:      list[Alert] = []
     resolved_alerts: list[Alert] = []
@@ -192,7 +233,7 @@ def ingest_telemetry_row(
     pack_v = fields.get("pack_voltage")
     if pack_v is not None:
         n, r = _check_and_manage(
-            db, device.id, trow.id,
+            db, device_id, telemetry_id,
             AlertType.high_voltage, AlertSeverity.critical,
             f"Pack voltage {pack_v:.2f}V exceeds {T['high_pack_voltage_v']}V limit",
             pack_v, T["high_pack_voltage_v"],
@@ -204,7 +245,7 @@ def ingest_telemetry_row(
     soc = fields.get("soc")
     if soc is not None:
         n, r = _check_and_manage(
-            db, device.id, trow.id,
+            db, device_id, telemetry_id,
             AlertType.low_soc, AlertSeverity.warning,
             f"SOC {soc:.1f}% below {T['low_soc_pct']}% threshold",
             soc, T["low_soc_pct"],
@@ -216,7 +257,7 @@ def ingest_telemetry_row(
     current = fields.get("pack_current")
     if current is not None:
         n, r = _check_and_manage(
-            db, device.id, trow.id,
+            db, device_id, telemetry_id,
             AlertType.overcurrent, AlertSeverity.critical,
             f"Pack current |{current:.1f}A| exceeds {T['overcurrent_a']}A limit",
             abs(current), T["overcurrent_a"],
@@ -228,7 +269,7 @@ def ingest_telemetry_row(
     avg_temp = fields.get("avg_cell_temp")
     if avg_temp is not None:
         n, r = _check_and_manage(
-            db, device.id, trow.id,
+            db, device_id, telemetry_id,
             AlertType.high_temp, AlertSeverity.critical,
             f"Average cell temperature {avg_temp:.1f}°C exceeds {T['high_temp_c']}°C limit",
             avg_temp, T["high_temp_c"],
@@ -242,7 +283,7 @@ def ingest_telemetry_row(
     if max_cv is not None and min_cv is not None:
         spread_mv = (max_cv - min_cv) * 1000
         n, r = _check_and_manage(
-            db, device.id, trow.id,
+            db, device_id, telemetry_id,
             AlertType.cell_imbalance, AlertSeverity.warning,
             f"Cell voltage spread {spread_mv:.0f}mV exceeds {T['cell_imbalance_mv']}mV threshold",
             spread_mv, T["cell_imbalance_mv"],
@@ -260,7 +301,7 @@ def ingest_telemetry_row(
 
         # Over-voltage
         n, r = _check_and_manage(
-            db, device.id, trow.id,
+            db, device_id, telemetry_id,
             AlertType.high_voltage, AlertSeverity.critical,
             f"Cell {cell_n} voltage {v_mv:.0f}mV exceeds {T['high_voltage_v']*1000:.0f}mV limit",
             v_mv, T["high_voltage_v"] * 1000,
@@ -271,7 +312,7 @@ def ingest_telemetry_row(
 
         # Under-voltage
         n, r = _check_and_manage(
-            db, device.id, trow.id,
+            db, device_id, telemetry_id,
             AlertType.low_voltage, AlertSeverity.critical,
             f"Cell {cell_n} voltage {v_mv:.0f}mV below {T['low_voltage_v']*1000:.0f}mV limit",
             v_mv, T["low_voltage_v"] * 1000,
@@ -280,5 +321,4 @@ def ingest_telemetry_row(
         )
         _track(n, r)
 
-    # ── 5. Return — caller commits ─────────────────────────────────────────
-    return trow, new_alerts, resolved_alerts
+    return new_alerts, resolved_alerts

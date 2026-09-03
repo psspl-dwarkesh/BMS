@@ -315,17 +315,38 @@ def _ingest_sync(
 
 # ── Public API ───────────────────────────────────────────────────────────────
 
-_tasks: list[asyncio.Task] = []
+# Keyed by device_id (not a plain list) so the watcher below can tell which
+# SIMULATED devices already have a running coroutine and which are new.
+_tasks: dict[int, asyncio.Task] = {}
+_watcher_task: asyncio.Task | None = None
+
+# How often to re-check for newly-registered SIMULATED devices. Devices don't
+# appear that often (an admin registering one is a rare, manual action), so
+# this is intentionally a slow poll, not a tight loop.
+DEVICE_DISCOVERY_INTERVAL_SECONDS = 30.0
 
 
-async def start_simulator(tick_seconds: float = 5.0) -> None:
-    """
-    Query all SIMULATED devices and spawn one coroutine per device.
-    Called from FastAPI lifespan on startup.
-    """
+def _spawn_device_task(dev: Device, tick_seconds: float) -> None:
+    home_lat = dev.home_latitude or 12.9716
+    home_lng = dev.home_longitude or 77.5946
+    task = asyncio.create_task(
+        _simulate_device(
+            device_id        = dev.id,
+            cell_count       = dev.cell_count,
+            thermistor_count = dev.thermistor_count,
+            home_lat         = home_lat,
+            home_lng         = home_lng,
+            tick_seconds     = tick_seconds,
+        ),
+        name=f"sim-device-{dev.id}",
+    )
+    _tasks[dev.id] = task
+
+
+def _query_simulated_devices() -> list[Device]:
     db: Session = SessionLocal()
     try:
-        devices = (
+        return (
             db.query(Device)
             .filter(Device.connection_type == ConnectionType.SIMULATED)
             .all()
@@ -333,38 +354,62 @@ async def start_simulator(tick_seconds: float = 5.0) -> None:
     finally:
         db.close()
 
-    if not devices:
-        log.info("Simulator: ENABLED but no SIMULATED devices found — nothing to do.")
-        return
 
-    log.info(
-        "Simulator: ENABLED — writing synthetic telemetry for %d device(s) "
-        "(source=simulator, tick=%.1fs)",
-        len(devices), tick_seconds,
-    )
+async def _watch_for_new_devices(tick_seconds: float) -> None:
+    """
+    Periodically re-queries for SIMULATED devices and spawns a coroutine for
+    any that don't have one running yet — otherwise a device registered
+    after startup would never get simulated telemetry until a full process
+    restart, since start_simulator() only ever ran this query once.
+    """
+    while True:
+        await asyncio.sleep(DEVICE_DISCOVERY_INTERVAL_SECONDS)
+        try:
+            devices = _query_simulated_devices()
+        except Exception:
+            log.exception("Simulator: device-discovery poll failed, will retry next interval")
+            continue
+        for dev in devices:
+            existing = _tasks.get(dev.id)
+            if existing is not None and not existing.done():
+                continue
+            log.info("Simulator: discovered new SIMULATED device_id=%d — starting coroutine", dev.id)
+            _spawn_device_task(dev, tick_seconds)
 
-    for dev in devices:
-        home_lat = dev.home_latitude  or 12.9716
-        home_lng = dev.home_longitude or 77.5946
-        task = asyncio.create_task(
-            _simulate_device(
-                device_id       = dev.id,
-                cell_count      = dev.cell_count,
-                thermistor_count = dev.thermistor_count,
-                home_lat        = home_lat,
-                home_lng        = home_lng,
-                tick_seconds    = tick_seconds,
-            ),
-            name=f"sim-device-{dev.id}",
+
+async def start_simulator(tick_seconds: float = 5.0) -> None:
+    """
+    Query all SIMULATED devices, spawn one coroutine per device, and start a
+    background watcher that picks up devices registered later. Called from
+    FastAPI lifespan on startup.
+    """
+    global _watcher_task
+    devices = _query_simulated_devices()
+
+    if devices:
+        log.info(
+            "Simulator: ENABLED — writing synthetic telemetry for %d device(s) "
+            "(source=simulator, tick=%.1fs)",
+            len(devices), tick_seconds,
         )
-        _tasks.append(task)
+        for dev in devices:
+            _spawn_device_task(dev, tick_seconds)
+    else:
+        log.info("Simulator: ENABLED but no SIMULATED devices found yet — will watch for new ones.")
+
+    _watcher_task = asyncio.create_task(_watch_for_new_devices(tick_seconds), name="sim-device-watcher")
 
 
 async def stop_simulator() -> None:
-    """Cancel all simulator tasks. Called from FastAPI lifespan on shutdown."""
-    for task in _tasks:
+    """Cancel all simulator tasks (and the discovery watcher). Called from FastAPI lifespan on shutdown."""
+    global _watcher_task
+    all_tasks = list(_tasks.values())
+    if _watcher_task is not None:
+        all_tasks.append(_watcher_task)
+    for task in all_tasks:
         task.cancel()
-    if _tasks:
-        await asyncio.gather(*_tasks, return_exceptions=True)
+    if all_tasks:
+        await asyncio.gather(*all_tasks, return_exceptions=True)
     _tasks.clear()
+    _watcher_task = None
     log.info("Simulator: stopped.")

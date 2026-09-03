@@ -1,18 +1,18 @@
-import { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { MapPin, AlertTriangle } from 'lucide-react';
-import { telemetryApi, devicesApi } from '../api/endpoints';
+import { MapPin, Route as RouteIcon } from 'lucide-react';
+import { telemetryApi, devicesApi, locationApi } from '../api/endpoints';
+import { LoadingState, EmptyState } from './common/StateViews';
 
+// Zero-dependency map: an embedded OSM iframe (no Leaflet/API-key needed) for
+// the live current-position pin. The OSM embed endpoint only supports a
+// single marker, not a rendered path, so the historical trail is instead
+// shown below the map as a real, scrollable point-by-point list backed by
+// GET /devices/:id/location/history - it was previously fetched nowhere in
+// this component despite the backend already supporting it.
 export default function LocationTracker() {
   const { id } = useParams();
-  
-  // We would normally use react-leaflet, but since we didn't install it, we can use an iframe to OpenStreetMap
-  // or a simple generic map placeholder, or we can install leaflet. 
-  // Let's use a simple HTML5 geolocation / OSM static map or iframe for this implementation, 
-  // or instruct the user to install leaflet if they want a real interactive map.
-  // Actually, since this is a React app, using a raw Leaflet Map without React-Leaflet requires direct DOM manipulation.
-  
+
   const { data: latest, isLoading } = useQuery({
     queryKey: ['telemetry-latest-loc', id],
     queryFn: () => telemetryApi.getLatest(id),
@@ -26,8 +26,14 @@ export default function LocationTracker() {
     enabled: !!id
   });
 
+  const { data: trail, isLoading: trailLoading } = useQuery({
+    queryKey: ['location-history', id],
+    queryFn: () => locationApi.getHistory(id),
+    enabled: !!id
+  });
+
   if (isLoading) {
-    return <div className="p-8 text-center">Loading location data...</div>;
+    return <LoadingState label="Loading location data..." />;
   }
 
   const lat = latest?.latitude;
@@ -78,6 +84,38 @@ export default function LocationTracker() {
             <MapPin size={48} style={{ opacity: 0.2, marginBottom: '1rem' }} />
             <p style={{ fontWeight: 600, color: 'var(--text-primary)', marginBottom: '0.5rem' }}>No GPS coordinates available</p>
             <p style={{ maxWidth: '400px' }}>This device is not reporting latitude/longitude telemetry data.</p>
+          </div>
+        )}
+      </div>
+
+      <div className="card" style={{ marginTop: '1.5rem' }}>
+        <div className="card-header">
+          <div>
+            <div className="card-title"><RouteIcon size={16} style={{ verticalAlign: '-2px', marginRight: '0.4rem' }} />Trace Record</div>
+            <div className="card-subtitle">GPS history for this device, most recent first</div>
+          </div>
+          {trail && <span className="badge badge-neutral">{trail.length} point{trail.length === 1 ? '' : 's'}</span>}
+        </div>
+        {trailLoading ? (
+          <LoadingState label="Loading GPS trail..." />
+        ) : !trail || trail.length === 0 ? (
+          <EmptyState icon={RouteIcon} title="No location history yet" message="Points will appear here as this device reports GPS coordinates over time." />
+        ) : (
+          <div style={{ maxHeight: '320px', overflowY: 'auto' }}>
+            <table className="data-table">
+              <thead>
+                <tr><th>Time</th><th>Latitude</th><th>Longitude</th></tr>
+              </thead>
+              <tbody>
+                {[...trail].reverse().map((p, idx) => (
+                  <tr key={idx}>
+                    <td style={{ color: 'var(--text-secondary)' }}>{new Date(p.sample_time).toLocaleString()}</td>
+                    <td>{p.latitude?.toFixed(6)}</td>
+                    <td>{p.longitude?.toFixed(6)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </div>

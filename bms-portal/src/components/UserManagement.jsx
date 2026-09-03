@@ -1,14 +1,16 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Users, UserPlus, ShieldAlert, CheckCircle, XCircle, Key, Battery, Save } from 'lucide-react';
+import { Users, UserPlus, Battery, Save } from 'lucide-react';
 import { usersApi, devicesApi } from '../api/endpoints';
+import { LoadingState, ErrorState } from './common/StateViews';
+import Select from './common/Select';
 
 export default function UserManagement() {
   const queryClient = useQueryClient();
   const [isCreating, setIsCreating] = useState(false);
   const [newUser, setNewUser] = useState({ email: '', full_name: '', password: '', role: 'user' });
 
-  const { data: users = [], isLoading } = useQuery({
+  const { data: users = [], isLoading, isError, refetch } = useQuery({
     queryKey: ['users'],
     queryFn: usersApi.getUsers
   });
@@ -83,10 +85,14 @@ export default function UserManagement() {
             </div>
             <div>
               <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.25rem' }}>Role</label>
-              <select className="form-input" value={newUser.role} onChange={e => setNewUser({...newUser, role: e.target.value})}>
-                <option value="user">User (Device Scoped)</option>
-                <option value="admin">Admin (Fleet Scoped)</option>
-              </select>
+              <Select
+                value={newUser.role}
+                onChange={(v) => setNewUser({...newUser, role: v})}
+                options={[
+                  { value: 'user', label: 'User (Device Scoped)' },
+                  { value: 'admin', label: 'Admin (Fleet Scoped)' },
+                ]}
+              />
             </div>
             <button type="submit" className="btn-primary" disabled={createMutation.isLoading}>
               <Save size={16} />
@@ -96,9 +102,11 @@ export default function UserManagement() {
         </div>
       )}
 
-      <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+      <div className="card" style={{ padding: isLoading || isError ? undefined : 0, overflow: 'hidden' }}>
         {isLoading ? (
-          <div className="p-8 text-center text-gray-400">Loading users...</div>
+          <LoadingState label="Loading users..." />
+        ) : isError ? (
+          <ErrorState title="Couldn't load users" message="The user list failed to load." onRetry={refetch} />
         ) : (
           <div style={{ overflowX: 'auto' }}>
             <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -145,17 +153,15 @@ export default function UserManagement() {
                               </button>
                             </span>
                           ))}
-                          <select 
-                            className="form-input" 
-                            style={{ padding: '0.1rem 0.5rem', fontSize: '0.75rem', width: 'auto', background: 'transparent' }}
+                          <Select
+                            style={{ width: '140px' }}
                             value=""
-                            onChange={(e) => e.target.value && assignDeviceMutation.mutate({ userId: user.id, deviceId: e.target.value })}
-                          >
-                            <option value="">+ Assign...</option>
-                            {devices.filter(d => !user.devices?.find(ud => ud.id === d.id)).map(d => (
-                              <option key={d.id} value={d.id}>{d.serial_number}</option>
-                            ))}
-                          </select>
+                            placeholder="+ Assign..."
+                            onChange={(deviceId) => deviceId && assignDeviceMutation.mutate({ userId: user.id, deviceId })}
+                            options={devices
+                              .filter(d => !user.devices?.find(ud => ud.id === d.id))
+                              .map(d => ({ value: d.id, label: d.serial_number }))}
+                          />
                         </div>
                       )}
                     </td>

@@ -6,6 +6,8 @@ os.environ directly, so there is one canonical place to see every knob.
 """
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+_INSECURE_DEFAULT_SECRET_KEY = "change-me-in-production-use-a-32-byte-random-hex"
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -15,8 +17,15 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    # ── Environment ──────────────────────────────────────────────────────────
+    # "development" is the only value that tolerates the insecure default
+    # SECRET_KEY below - set ENVIRONMENT=production (Render's envVars, Neon
+    # deploy, etc.) to make an unset/default SECRET_KEY a hard startup error
+    # instead of silently signing real JWTs with a value visible in this repo.
+    ENVIRONMENT: str = "development"
+
     # ── JWT ──────────────────────────────────────────────────────────────────
-    SECRET_KEY: str = "change-me-in-production-use-a-32-byte-random-hex"
+    SECRET_KEY: str = _INSECURE_DEFAULT_SECRET_KEY
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
 
@@ -33,8 +42,21 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite:///./bms_analytics.db"
 
     # ── Simulator ─────────────────────────────────────────────────────────────
-    SIMULATOR_ENABLED: bool = True
+    # Off by default - this is a CSV-upload-driven demo (see the "Upload &
+    # Analyze" flow), not a live-telemetry product. Still fully implemented
+    # and one env var away (SIMULATOR_ENABLED=True) if a live-mode demo is
+    # ever wanted later.
+    SIMULATOR_ENABLED: bool = False
     SIMULATOR_TICK_SECONDS: float = 5.0
 
 
 settings = Settings()
+
+if settings.ENVIRONMENT != "development" and settings.SECRET_KEY == _INSECURE_DEFAULT_SECRET_KEY:
+    raise RuntimeError(
+        "SECRET_KEY is unset (still the insecure placeholder) while ENVIRONMENT="
+        f"{settings.ENVIRONMENT!r}. Refusing to start: this would sign real JWTs "
+        "with a value visible in the public source. Set a real random SECRET_KEY "
+        "(e.g. `python -c \"import secrets; print(secrets.token_hex(32))\"`) via "
+        "the environment or .env file."
+    )
