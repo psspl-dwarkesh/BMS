@@ -148,7 +148,7 @@ export default function LoginPage() {
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
               <button 
                 type="button"
-                onClick={() => handleQuickLogin('admin@bms.local', 'adminpass')}
+                onClick={() => handleQuickLogin('admin@bms.local', 'admin123')}
                 className="btn-secondary" 
                 style={{ fontSize: '0.85rem', padding: '0.5rem' }}
                 disabled={loading}
@@ -157,7 +157,7 @@ export default function LoginPage() {
               </button>
               <button 
                 type="button"
-                onClick={() => handleQuickLogin('engineer@bms.local', 'engpass')}
+                onClick={() => handleQuickLogin('user@bms.local', 'user123')}
                 className="btn-secondary" 
                 style={{ fontSize: '0.85rem', padding: '0.5rem' }}
                 disabled={loading}
