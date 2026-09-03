@@ -179,7 +179,10 @@ export default function Layout() {
               value={selectedDeviceId}
               onChange={handleDeviceChange}
               placeholder="Select a device..."
-              options={devices.map(d => ({ value: String(d.id), label: `${d.serial_number} - ${d.pack_name}` }))}
+              options={[
+                ...(isAdmin && selectedDeviceId ? [{ value: '', label: '— Select battery —' }] : []),
+                ...devices.map(d => ({ value: String(d.id), label: `${d.serial_number} - ${d.pack_name}` })),
+              ]}
             />
           </div>
 
