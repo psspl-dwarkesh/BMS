@@ -3,6 +3,7 @@ import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { Globe, Users, Battery, Activity, AlertTriangle, Thermometer, Upload, FileText, Search, Bell, Settings, X, LogOut, Menu, Shield, Zap, CheckCircle2 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { alertsApi, devicesApi } from '../api/endpoints';
+import Select from './common/Select';
 
 // WebSocket connection hook
 export function useLiveSocket() {
@@ -109,8 +110,7 @@ export default function Layout() {
 
   const isAdmin = user?.role === 'admin';
 
-  const handleDeviceChange = (e) => {
-    const newId = e.target.value;
+  const handleDeviceChange = (newId) => {
     setSelectedDeviceId(newId);
     if (newId) {
       // Keep current tab, just change device
@@ -171,17 +171,13 @@ export default function Layout() {
 
           <div className="sidebar-section-label" style={{ marginTop: '1rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
             <span>Device View</span>
-            <select 
-              className="form-input" 
-              style={{ padding: '0.4rem', fontSize: '0.8rem', background: 'var(--bg-panel)' }}
+            <Select
+              style={{ width: '100%' }}
               value={selectedDeviceId}
               onChange={handleDeviceChange}
-            >
-              <option value="" disabled>Select a device...</option>
-              {devices.map(d => (
-                <option key={d.id} value={d.id}>{d.serial_number} - {d.pack_name}</option>
-              ))}
-            </select>
+              placeholder="Select a device..."
+              options={devices.map(d => ({ value: String(d.id), label: `${d.serial_number} - ${d.pack_name}` }))}
+            />
           </div>
 
           {selectedDeviceId && (
@@ -206,6 +202,9 @@ export default function Layout() {
               </NavLink>
               <NavLink to={`/app/devices/${selectedDeviceId}/thermal`} className={({isActive}) => `sidebar-nav-item ${isActive ? 'active' : ''}`} onClick={() => setSidebarOpen(false)}>
                 <Thermometer size={18} /> Thermal
+              </NavLink>
+              <NavLink to={`/app/devices/${selectedDeviceId}/findings`} className={({isActive}) => `sidebar-nav-item ${isActive ? 'active' : ''}`} onClick={() => setSidebarOpen(false)}>
+                <FileText size={18} /> Findings
               </NavLink>
               <NavLink to={`/app/devices/${selectedDeviceId}/alerts`} className={({isActive}) => `sidebar-nav-item ${isActive ? 'active' : ''}`} onClick={() => setSidebarOpen(false)}>
                 <AlertTriangle size={18} /> Alerts

@@ -15,12 +15,16 @@ from sqlalchemy.orm import DeclarativeBase, sessionmaker
 from config import settings
 
 
+_is_sqlite = settings.DATABASE_URL.startswith("sqlite")
+
 engine = create_engine(
     settings.DATABASE_URL,
     # SQLite requires check_same_thread=False when used from multiple threads
     # (e.g. the asyncio simulator calling sync SQLAlchemy via run_in_executor).
-    # This kwarg is silently ignored by other dialects.
-    connect_args={"check_same_thread": False},
+    # This is SQLite-specific (unlike the WAL pragma below, most DBAPI drivers
+    # - psycopg included - reject unknown connect() kwargs rather than
+    # ignoring them), so it must not be passed at all on a Postgres URL.
+    connect_args={"check_same_thread": False} if _is_sqlite else {},
 )
 
 

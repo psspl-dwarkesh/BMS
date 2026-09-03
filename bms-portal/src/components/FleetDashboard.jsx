@@ -1,15 +1,16 @@
 import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Globe, ShieldAlert, Battery, Activity, Search, MapPin, Server, Filter, CheckCircle2, AlertTriangle, Cpu } from 'lucide-react';
+import { Globe, ShieldAlert, Battery, Search, Server, Filter, CheckCircle2, AlertTriangle, Cpu } from 'lucide-react';
 import { devicesApi } from '../api/endpoints';
+import { LoadingState, ErrorState } from './common/StateViews';
 
 export default function FleetDashboard() {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const navigate = useNavigate();
 
-  const { data: fleetData = [], isLoading, isError } = useQuery({
+  const { data: fleetData = [], isLoading, isError, refetch } = useQuery({
     queryKey: ['devices'],
     queryFn: devicesApi.getDevices
   });
@@ -32,11 +33,17 @@ export default function FleetDashboard() {
   }, [fleetData]);
 
   if (isLoading) {
-    return <div className="p-8 text-center text-white">Loading fleet data...</div>;
+    return <LoadingState label="Loading fleet data..." />;
   }
 
   if (isError) {
-    return <div className="p-8 text-center text-red-500">Failed to load fleet data</div>;
+    return (
+      <ErrorState
+        title="Couldn't load the fleet"
+        message="The device list failed to load from the server."
+        onRetry={refetch}
+      />
+    );
   }
 
   return (
@@ -155,7 +162,7 @@ export default function FleetDashboard() {
                     </div>
                   </td>
                   <td style={{ padding: '1rem', color: 'var(--text-secondary)' }}>
-                    {pack.series_cells}S {pack.parallel_strings}P
+                    {pack.cell_count}S · {pack.connection_type}
                   </td>
                   <td style={{ padding: '1rem', textAlign: 'center' }}>
                     <button 

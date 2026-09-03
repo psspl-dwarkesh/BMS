@@ -11,3 +11,19 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.7
+      - key: ENVIRONMENT
+        value: production
+      # The three below are secrets/deployment-specific - set their actual
+      # values in the Render dashboard (Environment tab), not here:
+      #   SECRET_KEY    - a real random value (see config.py's startup check,
+      #                    which now refuses to boot without one in production)
+      #   DATABASE_URL  - the Neon Postgres connection string
+      #   CORS_ORIGINS  - this service's own origin (single-service deploy,
+      #                    so usually unnecessary, but set it if the frontend
+      #                    is ever split to a separate origin)
+      - key: SECRET_KEY
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
