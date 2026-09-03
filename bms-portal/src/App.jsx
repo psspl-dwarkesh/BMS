@@ -104,7 +104,6 @@ function App() {
               <Route path="devices/:id/thermal" element={<DeviceAnalyticsRoute component={ThermalAnalysis} propName="data" />} />
               <Route path="devices/:id/findings" element={<DeviceAnalyticsRoute component={AutomatedFindings} propName="data" />} />
               <Route path="devices/:id/alerts" element={<AlertsPage />} />
-              <Route path="devices/:id/upload" element={<DataIngestion />} />
               <Route path="devices/:id/reports" element={<DeviceAnalyticsRoute component={ReportGenerator} propName="data" />} />
               
               {/* Default redirect inside app shell */}

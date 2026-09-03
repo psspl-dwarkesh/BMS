@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
+import { useMutation } from '@tanstack/react-query';
 import Papa from 'papaparse';
 import { Upload, FileText, CheckCircle, AlertTriangle, Sparkles, X } from 'lucide-react';
 import { telemetryApi, devicesApi } from '../api/endpoints';
@@ -44,10 +44,12 @@ const SignalBadge = ({ ok, label }) => (
   </span>
 );
 
+// Upload & Analyze (app/upload): no device yet - drag-and-drop a CSV, preview
+// its detected signals, then create a new device from it and land on its
+// Automated Analytics Report. Per-device historical backfill was removed;
+// this is now the only CSV import entry point.
 export default function DataIngestion() {
-  const { id } = useParams();
   const navigate = useNavigate();
-  const isNewBatteryMode = !id;
 
   const [file, setFile] = useState(null);
   const [preview, setPreview] = useState(null); // { rowCount, signals }
@@ -55,17 +57,11 @@ export default function DataIngestion() {
   const [message, setMessage] = useState(null);
   const [dragOver, setDragOver] = useState(false);
 
-  const { data: device } = useQuery({
-    queryKey: ['device', id],
-    queryFn: () => devicesApi.getDevice(id),
-    enabled: !!id,
-  });
-
   const parseFile = (f, defaultName) => {
     setFile(f);
     setPreview(null);
     setMessage(null);
-    if (isNewBatteryMode) setPackName(defaultName || humanizeFilename(f.name));
+    setPackName(defaultName || humanizeFilename(f.name));
     Papa.parse(f, {
       header: true,
       skipEmptyLines: true,
@@ -106,20 +102,8 @@ export default function DataIngestion() {
     setMessage(null);
   };
 
-  // Backfill an existing device's history (devices/:id/upload).
-  const backfillMutation = useMutation({
-    mutationFn: (f) => telemetryApi.importCsv(id, f),
-    onSuccess: (data) => {
-      setMessage({ type: 'success', text: data.message || 'File uploaded successfully.' });
-      clearFile();
-    },
-    onError: (err) => {
-      setMessage({ type: 'error', text: err.response?.data?.detail || err.message || 'Failed to upload file' });
-    },
-  });
-
   // Create a brand-new device from an uploaded CSV, then import it, then go
-  // straight to its automated analytics report (app/upload, no :id yet).
+  // straight to its automated analytics report.
   const createMutation = useMutation({
     mutationFn: async ({ f, name, signals }) => {
       const newDevice = await devicesApi.createDevice({
@@ -141,15 +125,9 @@ export default function DataIngestion() {
     },
   });
 
-  const isSubmitting = isNewBatteryMode ? createMutation.isLoading : backfillMutation.isLoading;
-
   const handleSubmit = () => {
     if (!file) return;
-    if (isNewBatteryMode) {
-      createMutation.mutate({ f: file, name: packName, signals: preview?.signals });
-    } else {
-      backfillMutation.mutate(file);
-    }
+    createMutation.mutate({ f: file, name: packName, signals: preview?.signals });
   };
 
   return (
@@ -157,42 +135,38 @@ export default function DataIngestion() {
       <div style={{ marginBottom: '1.5rem' }}>
         <h2 style={{ fontSize: '1.5rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <Upload size={24} color="var(--accent-primary)" />
-          {isNewBatteryMode ? 'Upload & Analyze' : 'Historical Data Ingestion'}
+          Upload &amp; Analyze
         </h2>
         <div style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginTop: '0.25rem' }}>
-          {isNewBatteryMode
-            ? 'Upload a BMS CSV log to register a new battery and instantly generate its analytics report — no setup required.'
-            : `Upload CSV files to backfill historical telemetry for ${device?.pack_name || 'this device'} (SN: ${device?.serial_number || ''})`}
+          Upload a BMS CSV log to register a new battery and instantly generate its analytics report — no setup required.
         </div>
       </div>
 
       <div style={{ maxWidth: '680px', margin: '0 auto' }}>
-        {isNewBatteryMode && (
-          <div className="card" style={{ marginBottom: '1.5rem' }}>
-            <div className="card-title" style={{ marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-              <Sparkles size={16} color="var(--accent-primary)" /> Try a sample dataset
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.75rem' }}>
-              {SAMPLE_DATASETS.map((s) => (
-                <button
-                  key={s.file}
-                  type="button"
-                  onClick={() => loadSample(s)}
-                  disabled={isSubmitting}
-                  style={{
-                    textAlign: 'left', padding: '0.85rem', background: 'var(--bg-secondary)', border: '1px solid var(--border-default)',
-                    borderRadius: 'var(--radius-md)', cursor: isSubmitting ? 'default' : 'pointer', transition: 'border-color 0.15s',
-                  }}
-                  onMouseEnter={(e) => { if (!isSubmitting) e.currentTarget.style.borderColor = 'var(--accent-primary)'; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--border-default)'; }}
-                >
-                  <div style={{ fontWeight: 600, fontSize: '0.85rem', color: 'var(--text-primary)', marginBottom: '0.2rem' }}>{s.label}</div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{s.desc}</div>
-                </button>
-              ))}
-            </div>
+        <div className="card" style={{ marginBottom: '1.5rem' }}>
+          <div className="card-title" style={{ marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+            <Sparkles size={16} color="var(--accent-primary)" /> Try a sample dataset
           </div>
-        )}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.75rem' }}>
+            {SAMPLE_DATASETS.map((s) => (
+              <button
+                key={s.file}
+                type="button"
+                onClick={() => loadSample(s)}
+                disabled={createMutation.isLoading}
+                style={{
+                  textAlign: 'left', padding: '0.85rem', background: 'var(--bg-secondary)', border: '1px solid var(--border-default)',
+                  borderRadius: 'var(--radius-md)', cursor: createMutation.isLoading ? 'default' : 'pointer', transition: 'border-color 0.15s',
+                }}
+                onMouseEnter={(e) => { if (!createMutation.isLoading) e.currentTarget.style.borderColor = 'var(--accent-primary)'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--border-default)'; }}
+              >
+                <div style={{ fontWeight: 600, fontSize: '0.85rem', color: 'var(--text-primary)', marginBottom: '0.2rem' }}>{s.label}</div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{s.desc}</div>
+              </button>
+            ))}
+          </div>
+        </div>
 
         <div className="card" style={{ textAlign: 'center', padding: '2.5rem 2rem' }}>
           <div
@@ -247,7 +221,7 @@ export default function DataIngestion() {
             </div>
           )}
 
-          {isNewBatteryMode && file && (
+          {file && (
             <div className="form-group" style={{ textAlign: 'left', marginBottom: '1.25rem' }}>
               <label className="form-label">Battery / Pack Name</label>
               <input type="text" className="form-input" value={packName} onChange={(e) => setPackName(e.target.value)} placeholder="e.g. Warehouse Forklift Pack A" />
@@ -264,12 +238,10 @@ export default function DataIngestion() {
           <button
             className="btn-primary"
             style={{ width: '100%', padding: '1rem', fontSize: '1rem' }}
-            disabled={!file || isSubmitting}
+            disabled={!file || createMutation.isLoading}
             onClick={handleSubmit}
           >
-            {isSubmitting
-              ? (isNewBatteryMode ? 'Creating & analyzing…' : 'Uploading…')
-              : (isNewBatteryMode ? 'Create Battery & Analyze' : 'Start Import')}
+            {createMutation.isLoading ? 'Creating & analyzing…' : 'Create Battery & Analyze'}
           </button>
 
           <div style={{ marginTop: '2rem', textAlign: 'left', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
