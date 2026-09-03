@@ -40,7 +40,10 @@ export const usersApi = {
 
 export const devicesApi = {
   getDevices: async () => {
-    const { data } = await apiClient.get('/api/v1/devices/');
+    // No trailing slash - unlike /users/ and /alerts/, the backend registers
+    // this route as exactly /api/v1/devices (see backend/routers/devices.py).
+    // A trailing slash here 404s instead of redirecting.
+    const { data } = await apiClient.get('/api/v1/devices');
     return data;
   },
   getDevice: async (id) => {
@@ -48,7 +51,7 @@ export const devicesApi = {
     return data;
   },
   createDevice: async (device) => {
-    const { data } = await apiClient.post('/api/v1/devices/', device);
+    const { data } = await apiClient.post('/api/v1/devices', device);
     return data;
   },
   updateDevice: async (id, updates) => {
