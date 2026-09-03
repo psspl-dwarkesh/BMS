@@ -10,3 +10,4 @@ PyJWT
 bcrypt
 pydantic-settings
 python-dotenv
+psycopg[binary]

@@ -3,6 +3,8 @@ import { useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, CheckCircle, ShieldAlert, Filter, Calendar } from 'lucide-react';
 import { alertsApi, devicesApi } from '../api/endpoints';
+import { LoadingState, ErrorState } from './common/StateViews';
+import Select from './common/Select';
 
 export default function AlertsPage() {
   const { id } = useParams(); // undefined if fleet scope
@@ -17,9 +19,9 @@ export default function AlertsPage() {
     enabled: !!id
   });
 
-  const { data: alerts = [], isLoading } = useQuery({
+  const { data: alerts = [], isLoading, isError, refetch } = useQuery({
     queryKey: ['alerts', id, statusFilter, severityFilter],
-    queryFn: () => alertsApi.getAlerts({ 
+    queryFn: () => alertsApi.getAlerts({
       deviceId: id,
       status: statusFilter === 'all' ? undefined : statusFilter,
       severity: severityFilter === 'all' ? undefined : severityFilter
@@ -47,28 +49,40 @@ export default function AlertsPage() {
         </div>
 
         <div style={{ display: 'flex', gap: '1rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'var(--bg-secondary)', padding: '0.25rem', borderRadius: 'var(--radius-md)' }}>
-            <Filter size={14} color="var(--text-muted)" style={{ marginLeft: '0.5rem' }} />
-            <select className="form-input" style={{ border: 'none', background: 'transparent', padding: '0.2rem' }} value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
-              <option value="active">Active Only</option>
-              <option value="resolved">Resolved</option>
-              <option value="all">All Statuses</option>
-            </select>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <Filter size={14} color="var(--text-muted)" />
+            <Select
+              style={{ width: '160px' }}
+              value={statusFilter}
+              onChange={setStatusFilter}
+              options={[
+                { value: 'active', label: 'Active Only' },
+                { value: 'resolved', label: 'Resolved' },
+                { value: 'all', label: 'All Statuses' },
+              ]}
+            />
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'var(--bg-secondary)', padding: '0.25rem', borderRadius: 'var(--radius-md)' }}>
-            <ShieldAlert size={14} color="var(--text-muted)" style={{ marginLeft: '0.5rem' }} />
-            <select className="form-input" style={{ border: 'none', background: 'transparent', padding: '0.2rem' }} value={severityFilter} onChange={e => setSeverityFilter(e.target.value)}>
-              <option value="all">All Severities</option>
-              <option value="critical">Critical</option>
-              <option value="warning">Warning</option>
-            </select>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <ShieldAlert size={14} color="var(--text-muted)" />
+            <Select
+              style={{ width: '150px' }}
+              value={severityFilter}
+              onChange={setSeverityFilter}
+              options={[
+                { value: 'all', label: 'All Severities' },
+                { value: 'critical', label: 'Critical' },
+                { value: 'warning', label: 'Warning' },
+              ]}
+            />
           </div>
         </div>
       </div>
 
-      <div className="card" style={{ padding: 0 }}>
+      <div className="card" style={{ padding: isError ? undefined : 0 }}>
         {isLoading ? (
-          <div className="p-8 text-center text-gray-400">Loading alerts...</div>
+          <LoadingState label="Loading alerts..." />
+        ) : isError ? (
+          <ErrorState title="Couldn't load alerts" message="The alerts list failed to load from the server." onRetry={refetch} />
         ) : alerts.length === 0 ? (
           <div className="p-12 text-center text-gray-400" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
             <CheckCircle size={48} color="var(--success)" style={{ marginBottom: '1rem', opacity: 0.5 }} />

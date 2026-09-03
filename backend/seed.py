@@ -1,12 +1,21 @@
 """
 Seed script to initialize the database with schema, admin user, standard user,
 devices, and a historical telemetry trace for Device 1.
+
+Safe to re-run by default: if the `users` table already has rows, seeding is
+skipped entirely rather than wiping the database (this used to always
+`drop_all()` first unconditionally, which is fine against an empty local
+SQLite file but would destroy real data if ever re-run against a populated
+production database, e.g. Neon after go-live). Pass --reset to explicitly
+opt into the old destructive drop-and-recreate behavior.
 """
+import argparse
 import os
 import io
 import datetime
 import pandas as pd
 from sqlalchemy.orm import Session
+from sqlalchemy import inspect
 
 from config import settings
 from database import engine, Base, SessionLocal
@@ -18,9 +27,26 @@ from ingestion import ingest_telemetry_row
 from models import TelemetrySource
 
 
-def seed_database():
+def seed_database(reset: bool = False):
+    if reset:
+        print("--reset passed: dropping all tables first...")
+        Base.metadata.drop_all(bind=engine)
+    else:
+        # Idempotency guard: only skip if the `users` table exists AND has
+        # rows. inspect() lets us check "does the table exist yet" first, so
+        # a genuinely fresh database (schema not created at all) still seeds
+        # normally instead of throwing on a missing table.
+        if inspect(engine).has_table("users"):
+            db_check: Session = SessionLocal()
+            try:
+                if db_check.query(User).first() is not None:
+                    print("Database already has users — skipping seed (safe to re-run). "
+                          "Pass --reset to wipe and reseed from scratch.")
+                    return
+            finally:
+                db_check.close()
+
     print("Creating schema...")
-    Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
 
     db: Session = SessionLocal()
@@ -186,4 +212,7 @@ def seed_database():
 
 
 if __name__ == "__main__":
-    seed_database()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--reset", action="store_true", help="Drop all tables and reseed from scratch (destructive).")
+    args = parser.parse_args()
+    seed_database(reset=args.reset)

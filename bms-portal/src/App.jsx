@@ -31,6 +31,8 @@ import DegradationAnalysis from './components/DegradationAnalysis';
 import DataQuality from './components/DataQuality';
 import ThermalAnalysis from './components/ThermalAnalysis';
 import ReportGenerator from './components/ReportGenerator';
+import AutomatedFindings from './components/AutomatedFindings';
+import DeviceAnalyticsRoute from './components/DeviceAnalyticsRoute';
 
 import './index.css';
 
@@ -96,12 +98,13 @@ function App() {
               <Route path="devices/:id/history" element={<DeviceHistory />} />
               <Route path="devices/:id/cells" element={<CellAnalysis />} />
               <Route path="devices/:id/location" element={<LocationTracker />} />
-              <Route path="devices/:id/degradation" element={<DegradationAnalysis />} />
-              <Route path="devices/:id/quality" element={<DataQuality />} />
-              <Route path="devices/:id/thermal" element={<ThermalAnalysis />} />
+              <Route path="devices/:id/degradation" element={<DeviceAnalyticsRoute component={DegradationAnalysis} propName="data" />} />
+              <Route path="devices/:id/quality" element={<DeviceAnalyticsRoute component={DataQuality} propName="analyticsData" />} />
+              <Route path="devices/:id/thermal" element={<DeviceAnalyticsRoute component={ThermalAnalysis} propName="data" />} />
+              <Route path="devices/:id/findings" element={<DeviceAnalyticsRoute component={AutomatedFindings} propName="data" />} />
               <Route path="devices/:id/alerts" element={<AlertsPage />} />
               <Route path="devices/:id/upload" element={<DataIngestion />} />
-              <Route path="devices/:id/reports" element={<ReportGenerator />} />
+              <Route path="devices/:id/reports" element={<DeviceAnalyticsRoute component={ReportGenerator} propName="data" />} />
               
               {/* Default redirect inside app shell */}
               <Route index element={<Navigate to="fleet" replace />} />
