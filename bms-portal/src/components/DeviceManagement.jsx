@@ -121,9 +121,9 @@ export default function DeviceManagement() {
               <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.25rem' }}>Install Site</label>
               <input type="text" className="form-input" value={newDevice.install_site} onChange={e => setNewDevice({...newDevice, install_site: e.target.value})} placeholder="Warehouse A" />
             </div>
-            <button type="submit" className="btn-primary" disabled={createMutation.isLoading}>
+            <button type="submit" className="btn-primary" disabled={createMutation.isPending}>
               <Save size={16} />
-              {createMutation.isLoading ? 'Saving...' : 'Register'}
+              {createMutation.isPending ? 'Saving...' : 'Register'}
             </button>
           </form>
           {createMutation.isError && (

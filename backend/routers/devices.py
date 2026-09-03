@@ -3,6 +3,7 @@ import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -44,14 +45,47 @@ class PatchDeviceRequest(BaseModel):
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _device_snapshot(device: Device, db: Session) -> dict:
-    """Return device dict with the latest telemetry snapshot embedded."""
-    latest = (
-        db.query(Telemetry)
-        .filter(Telemetry.device_id == device.id)
-        .order_by(Telemetry.sample_time.desc())
-        .first()
+def _latest_telemetry_by_device(db: Session, device_ids: list[int]) -> dict[int, Telemetry]:
+    """Fetch the single latest Telemetry row per device_id in one query.
+
+    Used by list_devices to avoid an N+1 (one query per device) - a
+    device_id/max(sample_time) subquery joined back onto Telemetry.
+    """
+    if not device_ids:
+        return {}
+    latest_per_device = (
+        db.query(Telemetry.device_id, func.max(Telemetry.sample_time).label("max_time"))
+        .filter(Telemetry.device_id.in_(device_ids))
+        .group_by(Telemetry.device_id)
+        .subquery()
     )
+    rows = (
+        db.query(Telemetry)
+        .join(
+            latest_per_device,
+            (Telemetry.device_id == latest_per_device.c.device_id)
+            & (Telemetry.sample_time == latest_per_device.c.max_time),
+        )
+        .all()
+    )
+    # Ties on sample_time for the same device are rare and either row is fine.
+    return {t.device_id: t for t in rows}
+
+
+def _device_snapshot(device: Device, db: Session, latest: Telemetry | None = "unset") -> dict:
+    """Return device dict with the latest telemetry snapshot embedded.
+
+    `latest` can be pre-fetched (e.g. via _latest_telemetry_by_device for a
+    batch of devices) to avoid a per-device query; if left as the "unset"
+    sentinel, it's looked up here for the single-device case.
+    """
+    if latest == "unset":
+        latest = (
+            db.query(Telemetry)
+            .filter(Telemetry.device_id == device.id)
+            .order_by(Telemetry.sample_time.desc())
+            .first()
+        )
     d = {
         "id"               : device.id,
         "serial_number"    : device.serial_number,
@@ -103,7 +137,8 @@ def list_devices(
         ]
         devices = db.query(Device).filter(Device.id.in_(device_ids)).all()
 
-    return [_device_snapshot(d, db) for d in devices]
+    latest_by_device = _latest_telemetry_by_device(db, [d.id for d in devices])
+    return [_device_snapshot(d, db, latest_by_device.get(d.id)) for d in devices]
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
@@ -168,10 +203,13 @@ def patch_device(
 
     updates = body.model_dump(exclude_none=True)
     for key, val in updates.items():
-        if key == "chemistry":
-            val = Chemistry(val)
-        if key == "status":
-            val = DeviceStatus(val)
+        try:
+            if key == "chemistry":
+                val = Chemistry(val)
+            if key == "status":
+                val = DeviceStatus(val)
+        except ValueError:
+            raise HTTPException(status_code=422, detail=f"Invalid {key}: {val}")
         setattr(device, key, val)
 
     db.commit()

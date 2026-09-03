@@ -206,12 +206,12 @@ export default function DataIngestion() {
                 key={s.file}
                 type="button"
                 onClick={() => loadSample(s)}
-                disabled={createMutation.isLoading}
+                disabled={createMutation.isPending}
                 style={{
                   textAlign: 'left', padding: '0.85rem', background: 'var(--bg-secondary)', border: '1px solid var(--border-default)',
-                  borderRadius: 'var(--radius-md)', cursor: createMutation.isLoading ? 'default' : 'pointer', transition: 'border-color 0.15s',
+                  borderRadius: 'var(--radius-md)', cursor: createMutation.isPending ? 'default' : 'pointer', transition: 'border-color 0.15s',
                 }}
-                onMouseEnter={(e) => { if (!createMutation.isLoading) e.currentTarget.style.borderColor = 'var(--accent-primary)'; }}
+                onMouseEnter={(e) => { if (!createMutation.isPending) e.currentTarget.style.borderColor = 'var(--accent-primary)'; }}
                 onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--border-default)'; }}
               >
                 <div style={{ fontWeight: 600, fontSize: '0.85rem', color: 'var(--text-primary)', marginBottom: '0.2rem' }}>{s.label}</div>
@@ -253,7 +253,7 @@ export default function DataIngestion() {
                 <button
                   type="button"
                   onClick={clearAll}
-                  disabled={createMutation.isLoading}
+                  disabled={createMutation.isPending}
                   style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', fontSize: '0.75rem', cursor: 'pointer' }}
                 >
                   Clear all
@@ -289,7 +289,7 @@ export default function DataIngestion() {
                           title={entry.included ? 'Included in import' : 'Excluded from import'}
                           style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.72rem', color: 'var(--text-muted)', cursor: 'pointer', flexShrink: 0 }}
                         >
-                          <input type="checkbox" checked={entry.included} onChange={() => toggleIncluded(entry.id)} disabled={createMutation.isLoading} />
+                          <input type="checkbox" checked={entry.included} onChange={() => toggleIncluded(entry.id)} disabled={createMutation.isPending} />
                           Include
                         </label>
                         <button
@@ -304,7 +304,7 @@ export default function DataIngestion() {
                           type="button"
                           title="Remove file"
                           onClick={() => removeFile(entry.id)}
-                          disabled={createMutation.isLoading}
+                          disabled={createMutation.isPending}
                           style={{ background: 'transparent', border: 'none', color: 'var(--danger)', cursor: 'pointer', padding: '0.25rem', flexShrink: 0 }}
                         >
                           <Trash2 size={16} />
@@ -354,10 +354,10 @@ export default function DataIngestion() {
           <button
             className="btn-primary"
             style={{ width: '100%', padding: '1rem', fontSize: '1rem' }}
-            disabled={includedFiles.length === 0 || createMutation.isLoading}
+            disabled={includedFiles.length === 0 || createMutation.isPending}
             onClick={handleSubmit}
           >
-            {createMutation.isLoading
+            {createMutation.isPending
               ? 'Creating & analyzing…'
               : `Create Battery & Analyze${includedFiles.length > 1 ? ` (${includedFiles.length} files)` : ''}`}
           </button>

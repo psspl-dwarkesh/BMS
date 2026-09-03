@@ -60,6 +60,13 @@ export default function DeviceRealtime() {
   const { id } = useParams();
   const [timeSeries, setTimeSeries] = useState([]);
 
+  // Reset the running chart window when switching devices - otherwise the
+  // previous device's points linger (mixed in with the new device's) until
+  // enough new samples arrive to push them out of the 60-point window.
+  useEffect(() => {
+    setTimeSeries([]);
+  }, [id]);
+
   // Fetch device details
   const { data: device } = useQuery({
     queryKey: ['device', id],

@@ -32,7 +32,7 @@ def predict_rul(
     )
 
     if not telemetry or len(telemetry) < 10:
-        return {"error": "Insufficient telemetry data for RUL prediction. Need at least 10 samples."}
+        raise HTTPException(status_code=422, detail="Insufficient telemetry data for RUL prediction. Need at least 10 samples.")
 
     voltage_data = [t.pack_voltage for t in telemetry if t.pack_voltage is not None]
     current_data = [t.pack_current for t in telemetry if t.pack_current is not None]
@@ -41,7 +41,7 @@ def predict_rul(
     # For ml_inference, if lists are short due to nulls, pad or error
     min_len = min(len(voltage_data), len(current_data), len(temp_data))
     if min_len < 10:
-        return {"error": "Insufficient non-null telemetry data for RUL prediction."}
+        raise HTTPException(status_code=422, detail="Insufficient non-null telemetry data for RUL prediction.")
 
     # Pass the real elapsed times (in seconds) to the feature extractor if it supported it.
     # ml_inference.py currently uses ASSUMED_SAMPLE_INTERVAL_SECONDS internally for CSVs

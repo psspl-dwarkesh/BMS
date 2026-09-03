@@ -2,7 +2,7 @@
 import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from database import get_db
 from models import Alert, DeviceAssignment, User, UserRole
@@ -42,7 +42,7 @@ def list_alerts(
     Admin sees all alerts (or filtered by device_id).
     User sees only alerts for their assigned devices.
     """
-    q = db.query(Alert)
+    q = db.query(Alert).options(joinedload(Alert.device))
 
     # 1. Role scoping
     if current_user.role != UserRole.admin:
@@ -72,7 +72,11 @@ def list_alerts(
     if severity:
         q = q.filter(Alert.severity == severity)
 
-    rows = q.order_by(Alert.triggered_at.desc()).all()
+    # Unbounded before: a long-running install (per-cell alerts on top of
+    # pack-level ones) could return thousands of rows here with no limit.
+    # Cap rather than fully paginate, to keep the response shape (a plain
+    # array) the frontend already relies on.
+    rows = q.order_by(Alert.triggered_at.desc()).limit(500).all()
     return [_alert_to_dict(r) for r in rows]
 
 

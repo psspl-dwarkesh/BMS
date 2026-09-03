@@ -16,6 +16,11 @@ from ws_manager import manager
 
 router = APIRouter(prefix="/api/v1/devices/{device_id}/telemetry", tags=["telemetry"])
 
+# Cap on rows written per CSV import (demo safety limit, see
+# _process_import_in_background) - keep the endpoint's reported row count in
+# sync with what actually gets written.
+IMPORT_ROW_LIMIT = 1000
+
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -256,8 +261,8 @@ def _process_import_in_background(device_id: int, df_json: str):
             rows_written += len(pending)
             pending.clear()
 
-        # Limit to 1000 rows for safety in this demo
-        for idx, row in df.head(1000).iterrows():
+        # Limit rows for safety in this demo
+        for idx, row in df.head(IMPORT_ROW_LIMIT).iterrows():
             sample_time = datetime.datetime.utcnow()
             if time_col and pd.notnull(row[time_col]):
                 try:
@@ -363,10 +368,19 @@ async def import_csv_telemetry(
         df = pd.read_csv(io.StringIO(contents.decode('utf-8')))
         df_json = df.to_json(orient="records")
         background_tasks.add_task(_process_import_in_background, device_id, df_json)
-        
+
+        # _process_import_in_background caps at IMPORT_ROW_LIMIT rows - report
+        # that truncation to the caller instead of the full uploaded count,
+        # so a bigger file doesn't silently look fully imported.
+        accepted_rows = min(len(df), IMPORT_ROW_LIMIT)
+        message = "CSV upload accepted, processing in background."
+        if len(df) > IMPORT_ROW_LIMIT:
+            message += f" Only the first {IMPORT_ROW_LIMIT} of {len(df)} rows will be imported (demo limit)."
+
         return {
-            "message": "CSV upload accepted, processing in background.",
-            "rows": len(df)
+            "message": message,
+            "rows": accepted_rows,
+            "rows_uploaded": len(df),
         }
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to parse CSV: {str(e)}")

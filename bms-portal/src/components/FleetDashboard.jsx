@@ -134,6 +134,11 @@ export default function FleetDashboard() {
       </div>
 
       {/* Data Grid */}
+      {filteredFleet.length > 50 && (
+        <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>
+          Showing 50 of {filteredFleet.length} matching packs — refine your search to see more.
+        </div>
+      )}
       <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
         <div style={{ overflowX: 'auto' }}>
           <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse' }}>

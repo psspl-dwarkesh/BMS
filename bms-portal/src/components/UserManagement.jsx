@@ -94,9 +94,9 @@ export default function UserManagement() {
                 ]}
               />
             </div>
-            <button type="submit" className="btn-primary" disabled={createMutation.isLoading}>
+            <button type="submit" className="btn-primary" disabled={createMutation.isPending}>
               <Save size={16} />
-              {createMutation.isLoading ? 'Saving...' : 'Create'}
+              {createMutation.isPending ? 'Saving...' : 'Create'}
             </button>
           </form>
         </div>

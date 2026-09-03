@@ -159,7 +159,7 @@ export default function AlertsPage() {
                             className="btn-secondary"
                             style={{ padding: '0.3rem 0.6rem', fontSize: '0.75rem' }}
                             onClick={() => ackMutation.mutate(alert.id)}
-                            disabled={ackMutation.isLoading}
+                            disabled={ackMutation.isPending}
                           >
                             Acknowledge
                           </button>

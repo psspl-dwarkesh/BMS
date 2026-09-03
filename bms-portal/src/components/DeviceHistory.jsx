@@ -6,6 +6,7 @@ import {
 } from 'recharts';
 import { Calendar, Download, RefreshCw, AlertTriangle } from 'lucide-react';
 import { telemetryApi, devicesApi } from '../api/endpoints';
+import { BASE_URL } from '../api/apiClient';
 import { LoadingState, ErrorState } from './common/StateViews';
 import Select from './common/Select';
 
@@ -84,7 +85,7 @@ export default function DeviceHistory() {
     setExportError('');
     try {
       const token = localStorage.getItem('bms_token');
-      const url = `${import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'}/api/v1/devices/${id}/telemetry/history/export?start=${timeRange.start}&end=${timeRange.end}`;
+      const url = `${BASE_URL}/api/v1/devices/${id}/telemetry/history/export?start=${timeRange.start}&end=${timeRange.end}`;
       const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
       if (!res.ok) throw new Error('Export failed');
       const blob = await res.blob();

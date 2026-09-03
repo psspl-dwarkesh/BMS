@@ -39,7 +39,11 @@ def get_location_history(
     if end:
         q = q.filter(Telemetry.sample_time <= datetime.datetime.fromisoformat(end.replace('Z', '+00:00')))
 
-    rows = q.order_by(Telemetry.sample_time.asc()).all()
+    # Unbounded before: omitting start/end returned the device's entire GPS
+    # trace in one shot. Cap it, taking the most recent points (then
+    # re-sorting ascending) rather than truncating from the oldest end.
+    rows = q.order_by(Telemetry.sample_time.desc()).limit(2000).all()
+    rows.reverse()
 
     return [
         {
