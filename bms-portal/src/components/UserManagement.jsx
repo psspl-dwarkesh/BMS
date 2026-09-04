@@ -141,17 +141,28 @@ export default function UserManagement() {
                         <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>All Devices (Admin)</span>
                       ) : (
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
-                          {user.devices?.map(d => (
-                            <span key={d.id} className="badge badge-neutral" style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                              <Battery size={10} /> {d.serial_number}
-                              <button 
-                                onClick={() => unassignDeviceMutation.mutate({ userId: user.id, deviceId: d.id })}
-                                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, marginLeft: '0.25rem', color: 'var(--text-muted)' }}
-                                title="Remove Assignment"
-                              >
-                                &times;
-                              </button>
-                            </span>
+                          {/* The API returns device_ids (a list of ids), not a
+                              `devices` list of objects - reading user.devices
+                              here meant assigned-device badges never rendered
+                              at all, and the "+ Assign" dropdown below never
+                              excluded a device already assigned to this user
+                              (an already-assigned device stayed offered, and
+                              re-picking it just hit the backend's unique
+                              constraint with no explanation in the UI). */}
+                          {(user.device_ids || [])
+                            .map((id) => devices.find((d) => d.id === id))
+                            .filter(Boolean)
+                            .map((d) => (
+                              <span key={d.id} className="badge badge-neutral" style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                                <Battery size={10} /> {d.serial_number}
+                                <button
+                                  onClick={() => unassignDeviceMutation.mutate({ userId: user.id, deviceId: d.id })}
+                                  style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, marginLeft: '0.25rem', color: 'var(--text-muted)' }}
+                                  title="Remove Assignment"
+                                >
+                                  &times;
+                                </button>
+                              </span>
                           ))}
                           <Select
                             style={{ width: '140px' }}
@@ -159,8 +170,8 @@ export default function UserManagement() {
                             placeholder="+ Assign..."
                             onChange={(deviceId) => deviceId && assignDeviceMutation.mutate({ userId: user.id, deviceId })}
                             options={devices
-                              .filter(d => !user.devices?.find(ud => ud.id === d.id))
-                              .map(d => ({ value: d.id, label: d.serial_number }))}
+                              .filter((d) => !(user.device_ids || []).includes(d.id))
+                              .map((d) => ({ value: d.id, label: d.serial_number }))}
                           />
                         </div>
                       )}
