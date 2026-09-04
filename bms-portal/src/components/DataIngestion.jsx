@@ -91,6 +91,7 @@ export default function DataIngestion() {
         header: true,
         skipEmptyLines: true,
         preview: 2000, // cap client-side parse cost for a very large file - the real import runs server-side on the full file
+        worker: true, // parse off the main thread so a big file doesn't visibly freeze the UI during preview
         complete: (results) => {
           const headers = results.meta.fields || [];
           const preview = { rowCount: results.data.length, signals: detectSignals(headers) };

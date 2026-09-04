@@ -31,13 +31,7 @@ class AssignDeviceRequest(BaseModel):
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _user_to_dict(user: User, db: Session) -> dict:
-    device_ids = [
-        row.device_id
-        for row in db.query(DeviceAssignment.device_id)
-        .filter(DeviceAssignment.user_id == user.id)
-        .all()
-    ]
+def _user_to_dict(user: User, device_ids: list[int]) -> dict:
     return {
         "id"           : user.id,
         "email"        : user.email,
@@ -50,6 +44,21 @@ def _user_to_dict(user: User, db: Session) -> dict:
     }
 
 
+def _device_ids_by_user(db: Session, user_ids: list[int]) -> dict[int, list[int]]:
+    """Batch-fetch assigned device_ids for a list of users in one query (avoids N+1)."""
+    if not user_ids:
+        return {}
+    by_user: dict[int, list[int]] = {uid: [] for uid in user_ids}
+    rows = (
+        db.query(DeviceAssignment.user_id, DeviceAssignment.device_id)
+        .filter(DeviceAssignment.user_id.in_(user_ids))
+        .all()
+    )
+    for user_id, device_id in rows:
+        by_user[user_id].append(device_id)
+    return by_user
+
+
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.get("/")
@@ -58,7 +67,8 @@ def list_users(
     db: Session = Depends(get_db),
 ):
     users = db.query(User).order_by(User.created_at.desc()).all()
-    return [_user_to_dict(u, db) for u in users]
+    device_ids_by_user = _device_ids_by_user(db, [u.id for u in users])
+    return [_user_to_dict(u, device_ids_by_user.get(u.id, [])) for u in users]
 
 
 @router.post("/", status_code=status.HTTP_201_CREATED)
@@ -84,7 +94,7 @@ def create_user(
     db.add(user)
     db.commit()
     db.refresh(user)
-    return _user_to_dict(user, db)
+    return _user_to_dict(user, [])
 
 
 @router.patch("/{user_id}/activate")

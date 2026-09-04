@@ -122,14 +122,24 @@ async def websocket_endpoint(websocket: WebSocket, token: str = None):
             db.close()
             
         await manager.accept_authenticated(websocket, user_id, role, device_ids)
-        
+
         while True:
             # Keep connection alive, can accept client pings here
             _ = await websocket.receive_text()
-            
+
     except jwt.PyJWTError:
         await websocket.close(code=4001, reason="Invalid token")
     except WebSocketDisconnect:
+        pass
+    finally:
+        # Runs for every exit path (clean disconnect, invalid token, or any
+        # other unhandled exception from receive_text()/DB work above) -
+        # previously only WebSocketDisconnect removed the connection, so any
+        # other exception left a dead entry in manager._connections that
+        # broadcast_to_scoped would keep trying (and failing) to send to
+        # until its next failed send pruned it. remove() is a no-op if this
+        # connection was never registered (e.g. token/user checks failed
+        # before accept_authenticated ran).
         manager.remove(websocket)
 
 

@@ -7,13 +7,20 @@ export default function ReportGenerator({ data }) {
   const [generating, setGenerating] = useState(false);
   const [complete, setComplete] = useState(false);
   const [reportType, setReportType] = useState('full');
+  const [pdfError, setPdfError] = useState(null);
 
   const generatePDF = () => {
     if (!data) return;
     setGenerating(true);
     setComplete(false);
+    setPdfError(null);
 
     setTimeout(() => {
+      // The whole build used to run outside any try/catch: if jsPDF/autoTable
+      // threw partway through (malformed data, a page-break edge case, etc.)
+      // `generating` never got reset and the button was stuck on "Compiling
+      // PDF..." forever with no way to know it had failed.
+      try {
       const doc = new jsPDF();
       const { kpis, timeSeries, status, dataQuality, findings = [] } = data;
       const anomalies = data.allAnomalies || data.anomalies || [];
@@ -131,6 +138,11 @@ export default function ReportGenerator({ data }) {
       doc.save(`BMS-Report-${now.toISOString().split('T')[0]}.pdf`);
       setGenerating(false);
       setComplete(true);
+      } catch (err) {
+        console.error('PDF generation failed', err);
+        setGenerating(false);
+        setPdfError(err?.message || 'PDF generation failed. Try a different report type or reload the data.');
+      }
     }, 800);
   };
   
@@ -252,6 +264,7 @@ export default function ReportGenerator({ data }) {
           </div>
           
           {!data && <p style={{ color: 'var(--danger)', fontSize: '0.78rem', marginTop: '0.75rem', textAlign: 'center' }}>Upload or load a dataset to generate reports.</p>}
+          {pdfError && <p style={{ color: 'var(--danger)', fontSize: '0.78rem', marginTop: '0.75rem', textAlign: 'center' }}>{pdfError}</p>}
         </div>
 
         {/* Report preview */}

@@ -84,9 +84,9 @@ class User(Base):
     __tablename__ = "users"
 
     id                = Column(Integer, primary_key=True, index=True)
-    email             = Column(String, unique=True, index=True, nullable=False)
-    hashed_password   = Column(String, nullable=False)
-    full_name         = Column(String, nullable=False)
+    email             = Column(String(255), unique=True, index=True, nullable=False)
+    hashed_password   = Column(String(255), nullable=False)
+    full_name         = Column(String(255), nullable=False)
     role              = Column(Enum(UserRole), nullable=False, default=UserRole.user)
     is_active         = Column(Boolean, default=True, nullable=False)
     created_at        = Column(DateTime, default=_now, nullable=False)
@@ -100,17 +100,17 @@ class Device(Base):
     __tablename__ = "devices"
 
     id                  = Column(Integer, primary_key=True, index=True)
-    serial_number       = Column(String, unique=True, index=True, nullable=False)
-    pack_name           = Column(String, nullable=False)
-    manufacturer        = Column(String, nullable=True)
-    manufacture_date    = Column(String, nullable=True)   # ISO date string
+    serial_number       = Column(String(100), unique=True, index=True, nullable=False)
+    pack_name           = Column(String(255), nullable=False)
+    manufacturer        = Column(String(255), nullable=True)
+    manufacture_date    = Column(String(32), nullable=True)   # ISO date string
     chemistry           = Column(Enum(Chemistry), nullable=True, default=Chemistry.li_ion)
     rated_voltage       = Column(Float, nullable=True)    # V
     rated_capacity_ah   = Column(Float, nullable=True)    # Ah
     cell_count          = Column(Integer, default=16, nullable=False)
     thermistor_count    = Column(Integer, default=4,  nullable=False)
     connection_type     = Column(Enum(ConnectionType), nullable=False, default=ConnectionType.SIMULATED)
-    install_site        = Column(String, nullable=True)
+    install_site        = Column(String(255), nullable=True)
     status              = Column(Enum(DeviceStatus), nullable=False, default=DeviceStatus.active)
     last_seen_at        = Column(DateTime, nullable=True)
     created_at          = Column(DateTime, default=_now, nullable=False)
@@ -206,17 +206,27 @@ class Alert(Base):
     __tablename__ = "alerts"
     __table_args__ = (
         Index("ix_alerts_device_triggered", "device_id", "triggered_at"),
+        # Supports _open_alert()'s actual filter shape (device_id, type,
+        # resolved_at[, cell_number]) - the hot-path query run on every
+        # single ingested telemetry row (once per pack-level check, once per
+        # cell), so it's worth its own index rather than relying on the
+        # device_id/triggered_at one above, which doesn't cover this filter.
+        Index("ix_alerts_device_type_resolved", "device_id", "type", "resolved_at"),
     )
 
     id                      = Column(Integer, primary_key=True, index=True)
     device_id               = Column(Integer, ForeignKey("devices.id", ondelete="CASCADE"), nullable=False, index=True)
-    telemetry_id            = Column(Integer, ForeignKey("telemetry.id"), nullable=True)
+    # SET NULL rather than CASCADE/no-action: a resolved historical alert is
+    # still meaningful on its own after the telemetry row that triggered it
+    # is gone (e.g. a future retention/cleanup job purging old Telemetry
+    # rows) - it just loses the direct link back to that sample.
+    telemetry_id            = Column(Integer, ForeignKey("telemetry.id", ondelete="SET NULL"), nullable=True)
 
     type                    = Column(Enum(AlertType),     nullable=False)
     severity                = Column(Enum(AlertSeverity), nullable=False)
     cell_number             = Column(Integer, nullable=True)   # set for per-cell alerts
 
-    message                 = Column(String, nullable=False)
+    message                 = Column(String(500), nullable=False)
     value                   = Column(Float,  nullable=True)     # the measured value that triggered it
     threshold               = Column(Float,  nullable=True)     # the threshold it breached
 

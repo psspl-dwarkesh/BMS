@@ -617,6 +617,11 @@ a { text-decoration: none; color: inherit; }
 
 .data-table {
   width: 100%;
+  /* Below this, cells were squeezing/wrapping into an unreadable jumble on
+     mobile instead of triggering their wrapper's overflow-x: auto scroll -
+     a fixed min-width forces a clean horizontal scroll on narrow viewports
+     rather than each column collapsing. */
+  min-width: 640px;
   border-collapse: separate;
   border-spacing: 0;
   font-size: 0.8rem;
@@ -635,6 +640,14 @@ a { text-decoration: none; color: inherit; }
   text-transform: uppercase;
   font-size: 0.7rem;
   letter-spacing: 0.05em;
+  white-space: nowrap; /* header labels are short - never want them mid-wrapping into two lines */
+}
+
+@media (max-width: 640px) {
+  .data-table th, .data-table td {
+    padding: 0.6rem 0.75rem;
+    font-size: 0.75rem;
+  }
 }
 
 .data-table th:first-child { border-top-left-radius: var(--radius-sm); }
