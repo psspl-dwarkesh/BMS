@@ -84,20 +84,50 @@ def _latest_telemetry_by_device(db: Session, device_ids: list[int]) -> dict[int,
     return {t.device_id: t for t in rows}
 
 
-def _device_snapshot(device: Device, db: Session, latest: Telemetry | None = "unset") -> dict:
+def _import_counts_by_device(db: Session, device_ids: list[int]) -> dict[int, int]:
+    """Batch-fetch how many CSV import batches each device has (one query, not N+1).
+
+    Lets Fleet Overview show "N CSVs" per battery directly in the table -
+    previously the only way to see this was to select the device first and
+    open its Data Sources panel.
+    """
+    if not device_ids:
+        return {}
+    rows = (
+        db.query(TelemetryImport.device_id, func.count(TelemetryImport.id))
+        .filter(TelemetryImport.device_id.in_(device_ids))
+        .group_by(TelemetryImport.device_id)
+        .all()
+    )
+    return dict(rows)
+
+
+def _device_snapshot(device: Device, db: Session, latest: Telemetry | None = "unset", csv_import_count: int | None = None) -> dict:
     """Return device dict with the latest telemetry snapshot embedded.
 
     `latest` can be pre-fetched (e.g. via _latest_telemetry_by_device for a
     batch of devices) to avoid a per-device query; if left as the "unset"
-    sentinel, it's looked up here for the single-device case.
+    sentinel, it's looked up here for the single-device case. Likewise
+    `csv_import_count` can be pre-fetched via _import_counts_by_device.
     """
     if latest == "unset":
+        # Same "exclude hidden CSV batches" rule as _latest_telemetry_by_device
+        # above (used by list_devices) - this single-device path is the one
+        # get_device()/create_device()/patch_device() hit, and was missing
+        # the filter entirely, so a device's own detail fetch could still
+        # show a batch the user had just toggled off in its Data Sources panel.
         latest = (
             db.query(Telemetry)
-            .filter(Telemetry.device_id == device.id)
+            .outerjoin(TelemetryImport, Telemetry.import_id == TelemetryImport.id)
+            .filter(
+                Telemetry.device_id == device.id,
+                or_(Telemetry.import_id.is_(None), TelemetryImport.included == True),
+            )
             .order_by(Telemetry.sample_time.desc())
             .first()
         )
+    if csv_import_count is None:
+        csv_import_count = db.query(func.count(TelemetryImport.id)).filter(TelemetryImport.device_id == device.id).scalar() or 0
     d = {
         "id"               : device.id,
         "serial_number"    : device.serial_number,
@@ -120,6 +150,7 @@ def _device_snapshot(device: Device, db: Session, latest: Telemetry | None = "un
         # could display or reuse a device's home coordinate.
         "home_latitude"    : device.home_latitude,
         "home_longitude"   : device.home_longitude,
+        "csv_import_count" : csv_import_count,
         "latest_telemetry" : None,
     }
     if latest:
@@ -157,8 +188,10 @@ def list_devices(
         ]
         devices = db.query(Device).filter(Device.id.in_(device_ids)).all()
 
-    latest_by_device = _latest_telemetry_by_device(db, [d.id for d in devices])
-    return [_device_snapshot(d, db, latest_by_device.get(d.id)) for d in devices]
+    device_ids = [d.id for d in devices]
+    latest_by_device = _latest_telemetry_by_device(db, device_ids)
+    counts_by_device = _import_counts_by_device(db, device_ids)
+    return [_device_snapshot(d, db, latest_by_device.get(d.id), counts_by_device.get(d.id, 0)) for d in devices]
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
@@ -198,6 +231,28 @@ def create_device(
     db.commit()
     db.refresh(device)
     return _device_snapshot(device, db)
+
+
+@router.delete("/{device_id}")
+def delete_device(
+    device_id: int,
+    _admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Admin-only: permanently deregister a battery pack.
+
+    Device.telemetry/assignments/alerts/imports all cascade="all,
+    delete-orphan" (see models.py), so this also removes every telemetry
+    row, CellReading, CSV import record, alert, and user assignment tied to
+    it. Irreversible - the frontend gates this behind its own confirm step.
+    """
+    device = db.query(Device).filter(Device.id == device_id).first()
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+    db.delete(device)
+    db.commit()
+    return {"deleted": True, "device_id": device_id}
 
 
 @router.get("/{device_id}")

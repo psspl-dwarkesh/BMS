@@ -1,6 +1,7 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { X, FileText, Eye, EyeOff, Trash2, Clock, CheckCircle, AlertTriangle, Loader2, Database } from 'lucide-react';
+import { X, FileText, Eye, EyeOff, Trash2, Clock, CheckCircle, AlertTriangle, Loader2, Database, Plus } from 'lucide-react';
 import { telemetryApi } from '../api/endpoints';
 import { LoadingState, EmptyState } from './common/StateViews';
 
@@ -210,7 +211,13 @@ function ImportRow({ deviceId, imp }) {
 }
 
 export default function UploadHistoryPanel({ deviceId, open, onClose }) {
+  const navigate = useNavigate();
   const { data: imports = [], isLoading } = useDeviceImports(deviceId);
+
+  const goAddData = () => {
+    onClose();
+    navigate(`/app/upload?device=${deviceId}`);
+  };
 
   return (
     <>
@@ -235,11 +242,23 @@ export default function UploadHistoryPanel({ deviceId, open, onClose }) {
               <Database size={17} color="var(--accent-primary)" /> Data Sources
             </div>
             <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.15rem' }}>
-              Every CSV imported into this battery
+              Every CSV imported into this battery — data from the live
+              simulator, or imported before this panel existed, won't appear
+              here since it isn't tied to a CSV batch.
             </div>
           </div>
-          <button onClick={onClose} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: '0.25rem' }}>
+          <button onClick={onClose} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: '0.25rem', flexShrink: 0 }}>
             <X size={20} />
+          </button>
+        </div>
+
+        <div style={{ padding: '0.85rem 1.25rem', borderBottom: '1px solid var(--border-light)' }}>
+          <button
+            type="button"
+            onClick={goAddData}
+            style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem', padding: '0.55rem', fontSize: '0.8rem', fontWeight: 600, background: 'var(--accent-primary)', color: '#fff', border: 'none', borderRadius: 'var(--radius-sm)', cursor: 'pointer' }}
+          >
+            <Plus size={15} /> Add more CSV data to this battery
           </button>
         </div>
 
@@ -247,7 +266,7 @@ export default function UploadHistoryPanel({ deviceId, open, onClose }) {
           {isLoading ? (
             <LoadingState label="Loading upload history…" />
           ) : imports.length === 0 ? (
-            <EmptyState icon={FileText} title="No CSVs imported yet" message="Files imported via Upload & Analyze, or a future backfill, will show up here with a timestamp, an include/exclude toggle, and a delete option." />
+            <EmptyState icon={FileText} title="No CSVs imported yet" message="Files imported via Upload & Analyze will show up here with a timestamp, an include/exclude toggle, and a delete option." />
           ) : (
             imports.map((imp) => <ImportRow key={imp.id} deviceId={deviceId} imp={imp} />)
           )}

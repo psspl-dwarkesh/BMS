@@ -1,9 +1,10 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { useMutation } from '@tanstack/react-query';
+import { useEffect, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import Papa from 'papaparse';
-import { Upload, FileText, CheckCircle, AlertTriangle, Sparkles, X, Eye, EyeOff, Trash2 } from 'lucide-react';
+import { Upload, FileText, CheckCircle, AlertTriangle, Sparkles, Eye, EyeOff, Trash2, Battery, PlusCircle } from 'lucide-react';
 import { telemetryApi, devicesApi } from '../api/endpoints';
+import { importsQueryKey } from './UploadHistoryPanel';
 
 // Bundled demo datasets (see backend/scripts/gen_sample_csvs.py for how
 // they were generated) - let the "Upload & Analyze" flow work with zero
@@ -47,14 +48,44 @@ const SignalBadge = ({ ok, label }) => (
   </span>
 );
 
-// Upload & Analyze (app/upload): no device yet. Supports adding one or more
-// CSVs at once (a device may have several historical logs, similar to how
-// real telemetry arrives in batches) - each one can be previewed, toggled
-// in/out of the import, or removed before anything is sent to the backend.
-// On submit, a new device is created and every enabled file is imported
-// into it in order, then the user lands on its Automated Analytics Report.
+// Upload & Analyze (app/upload). Two destinations for the files you add:
+//   - "Append" to an already-registered battery (the primary/default choice
+//     whenever you arrived here with one selected - see Layout.jsx's sidebar
+//     link and UploadHistoryPanel's "Add more CSV data" shortcut, both of
+//     which carry ?device=<id>). Every included file is imported into that
+//     existing device as a new batch, alongside whatever it already has -
+//     visible afterward in its Data Sources panel.
+//   - "Create a new battery" (the only option when there's no device
+//     context) - a brand-new device is registered, sized from the first
+//     file's detected cell/thermistor count, then every included file is
+//     imported into it.
+// Either way, each file can be previewed, toggled in/out, or removed before
+// anything is sent to the backend - reviewing a file without importing it is
+// just leaving it selected without hitting the submit button.
 export default function DataIngestion() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const [searchParams] = useSearchParams();
+  const requestedDeviceId = searchParams.get('device');
+
+  // Reuses Layout's/FleetDashboard's cached ['devices'] query - no extra
+  // network round trip just to resolve the target device's name.
+  const { data: devices = [], isSuccess: devicesLoaded } = useQuery({
+    queryKey: ['devices'],
+    queryFn: devicesApi.getDevices,
+  });
+  const targetDevice = requestedDeviceId
+    ? devices.find((d) => String(d.id) === String(requestedDeviceId))
+    : null;
+
+  // 'append' | 'create'. Defaults to append whenever a valid target device
+  // is known - that's the common case (you were looking at a battery and
+  // clicked "Add more data"/"Upload & Analyze") - and to create otherwise.
+  const [mode, setMode] = useState(requestedDeviceId ? 'append' : 'create');
+  useEffect(() => {
+    if (devicesLoaded && targetDevice) setMode('append');
+    else if (devicesLoaded && requestedDeviceId && !targetDevice) setMode('create'); // stale/inaccessible device id in the URL
+  }, [devicesLoaded, targetDevice, requestedDeviceId]);
 
   // batch entries: { id, file, name, size, preview: {rowCount, signals}|null, included, expanded }
   const [batch, setBatch] = useState([]);
@@ -63,11 +94,16 @@ export default function DataIngestion() {
   const [message, setMessage] = useState(null);
   const [dragOver, setDragOver] = useState(false);
   const [uploadingFileId, setUploadingFileId] = useState(null);
+  // Gates the actual upload behind an explicit "yes, do this" step once
+  // files are chosen - reset whenever the destination or the file selection
+  // changes underneath it, so a stale summary can never be confirmed.
+  const [showConfirm, setShowConfirm] = useState(false);
 
   const addFiles = (fileList, defaultName) => {
     const files = Array.from(fileList || []).filter((f) => f);
     if (files.length === 0) return;
     setMessage(null);
+    setShowConfirm(false);
 
     const entries = files.map((f) => ({
       id: nextBatchId++,
@@ -131,10 +167,12 @@ export default function DataIngestion() {
   const removeFile = (id) => {
     setBatch((prev) => prev.filter((e) => e.id !== id));
     setActiveId((cur) => (cur === id ? null : cur));
+    setShowConfirm(false);
   };
 
   const toggleIncluded = (id) => {
     setBatch((prev) => prev.map((e) => (e.id === id ? { ...e, included: !e.included } : e)));
+    setShowConfirm(false);
   };
 
   const toggleExpanded = (id) => {
@@ -146,43 +184,73 @@ export default function DataIngestion() {
     setBatch([]);
     setActiveId(null);
     setMessage(null);
+    setShowConfirm(false);
+  };
+
+  const selectMode = (nextMode) => {
+    setMode(nextMode);
+    setShowConfirm(false);
   };
 
   const includedFiles = batch.filter((e) => e.included);
 
-  // Create a brand-new device sized from the first included file's detected
-  // signals, then import every included file into it in order, then go
-  // straight to its automated analytics report.
+  // Append mode: import every included file into the already-registered
+  // target device, as additional batches alongside whatever it already has.
+  // Create mode: register a brand-new device sized from the first included
+  // file's detected signals, then import every included file into it.
+  // Either way, land on the device's automated analytics report afterward.
   const createMutation = useMutation({
-    mutationFn: async ({ files, name }) => {
-      const firstSignals = files.find((e) => e.preview?.signals)?.preview?.signals;
-      const newDevice = await devicesApi.createDevice({
-        serial_number: `BMS-${Date.now().toString(36).toUpperCase()}`,
-        pack_name: name || humanizeFilename(files[0].file.name),
-        chemistry: 'Li-ion',
-        cell_count: firstSignals?.cellCount || 16,
-        thermistor_count: firstSignals?.thermistorCount || 4,
-        connection_type: 'SIMULATED',
-      });
+    mutationFn: async ({ files, name, mode: submitMode, deviceId }) => {
+      let device;
+      if (submitMode === 'append' && deviceId) {
+        device = { id: deviceId };
+      } else {
+        const firstSignals = files.find((e) => e.preview?.signals)?.preview?.signals;
+        device = await devicesApi.createDevice({
+          serial_number: `BMS-${Date.now().toString(36).toUpperCase()}`,
+          pack_name: name || humanizeFilename(files[0].file.name),
+          chemistry: 'Li-ion',
+          cell_count: firstSignals?.cellCount || 16,
+          thermistor_count: firstSignals?.thermistorCount || 4,
+          connection_type: 'SIMULATED',
+        });
+      }
       for (const entry of files) {
         setUploadingFileId(entry.id);
-        await telemetryApi.importCsv(newDevice.id, entry.file);
+        await telemetryApi.importCsv(device.id, entry.file);
       }
       setUploadingFileId(null);
-      return newDevice;
+      return device;
     },
-    onSuccess: (newDevice) => {
-      navigate(`/app/devices/${newDevice.id}/findings`);
+    onSuccess: (device) => {
+      // Appended into an existing device: its Data Sources panel, Real-Time,
+      // History, and every analytics tab need to see the new batch, not a
+      // stale cached list from before this upload.
+      queryClient.invalidateQueries({ queryKey: importsQueryKey(String(device.id)) });
+      queryClient.invalidateQueries({ queryKey: ['telemetry-latest', String(device.id)] });
+      queryClient.invalidateQueries({ queryKey: ['telemetry-history', String(device.id)] });
+      queryClient.invalidateQueries({ queryKey: ['device-analytics', String(device.id)] });
+      queryClient.invalidateQueries({ queryKey: ['devices'] });
+      navigate(`/app/devices/${device.id}/findings`);
     },
     onError: (err) => {
       setUploadingFileId(null);
-      setMessage({ type: 'error', text: err.response?.data?.detail || err.message || 'Failed to create a battery from these files' });
+      setShowConfirm(false);
+      setMessage({ type: 'error', text: err.response?.data?.detail || err.message || 'Failed to import these files' });
     },
   });
 
-  const handleSubmit = () => {
+  // Primary button always opens the confirmation summary first; a second
+  // click there (handleConfirmedSubmit) is what actually uploads anything.
+  const handlePrimaryClick = () => {
     if (includedFiles.length === 0) return;
-    createMutation.mutate({ files: includedFiles, name: packName });
+    setShowConfirm(true);
+  };
+
+  const handleConfirmedSubmit = () => {
+    if (includedFiles.length === 0) return;
+    if (mode === 'append' && !targetDevice) return; // guard: shouldn't be reachable, append UI only renders with a resolved target
+    createMutation.mutate({ files: includedFiles, name: packName, mode, deviceId: targetDevice?.id });
   };
 
   return (
@@ -193,7 +261,9 @@ export default function DataIngestion() {
           Upload &amp; Analyze
         </h2>
         <div style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginTop: '0.25rem' }}>
-          Upload one or more BMS CSV logs to register a new battery and instantly generate its analytics report — no setup required.
+          {mode === 'append' && targetDevice
+            ? <>Add one or more BMS CSV logs to <strong>{targetDevice.pack_name}</strong> ({targetDevice.serial_number}) — they're imported as new batches, visible and manageable afterward in its Data Sources panel.</>
+            : 'Upload one or more BMS CSV logs to register a new battery and instantly generate its analytics report — no setup required.'}
         </div>
       </div>
 
@@ -339,10 +409,50 @@ export default function DataIngestion() {
             </div>
           )}
 
-          {batch.length > 0 && (
+          {/* Destination choice only shows up once there's actually
+              something to upload - deciding where files go before any are
+              even selected read oddly out of order. */}
+          {batch.length > 0 && requestedDeviceId && targetDevice && (
+            <div style={{ textAlign: 'left', marginBottom: '1.25rem' }}>
+              <div className="form-label" style={{ marginBottom: '0.4rem' }}>Add this data to…</div>
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <button
+                  type="button"
+                  onClick={() => selectMode('append')}
+                  disabled={createMutation.isPending}
+                  style={{
+                    flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem', padding: '0.65rem', fontSize: '0.82rem', fontWeight: 600,
+                    borderRadius: 'var(--radius-md)', cursor: createMutation.isPending ? 'default' : 'pointer', border: `1.5px solid ${mode === 'append' ? 'var(--accent-primary)' : 'var(--border-default)'}`,
+                    background: mode === 'append' ? 'var(--accent-light)' : 'transparent', color: mode === 'append' ? 'var(--accent-primary)' : 'var(--text-secondary)',
+                  }}
+                >
+                  <Battery size={15} /> Append to {targetDevice.pack_name}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => selectMode('create')}
+                  disabled={createMutation.isPending}
+                  style={{
+                    flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem', padding: '0.65rem', fontSize: '0.82rem', fontWeight: 600,
+                    borderRadius: 'var(--radius-md)', cursor: createMutation.isPending ? 'default' : 'pointer', border: `1.5px solid ${mode === 'create' ? 'var(--accent-primary)' : 'var(--border-default)'}`,
+                    background: mode === 'create' ? 'var(--accent-light)' : 'transparent', color: mode === 'create' ? 'var(--accent-primary)' : 'var(--text-secondary)',
+                  }}
+                >
+                  <PlusCircle size={15} /> Create a separate new battery
+                </button>
+              </div>
+              {mode === 'create' && (
+                <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.4rem' }}>
+                  This registers a brand-new, independent battery — {targetDevice.pack_name} and its existing data are never touched or removed.
+                </div>
+              )}
+            </div>
+          )}
+
+          {batch.length > 0 && mode === 'create' && (
             <div className="form-group" style={{ textAlign: 'left', marginBottom: '1.25rem' }}>
               <label className="form-label">Battery / Pack Name</label>
-              <input type="text" className="form-input" value={packName} onChange={(e) => setPackName(e.target.value)} placeholder="e.g. Warehouse Forklift Pack A" />
+              <input type="text" className="form-input" value={packName} onChange={(e) => { setPackName(e.target.value); setShowConfirm(false); }} placeholder="e.g. Warehouse Forklift Pack A" />
             </div>
           )}
 
@@ -353,16 +463,46 @@ export default function DataIngestion() {
             </div>
           )}
 
-          <button
-            className="btn-primary"
-            style={{ width: '100%', padding: '1rem', fontSize: '1rem' }}
-            disabled={includedFiles.length === 0 || createMutation.isPending}
-            onClick={handleSubmit}
-          >
-            {createMutation.isPending
-              ? 'Creating & analyzing…'
-              : `Create Battery & Analyze${includedFiles.length > 1 ? ` (${includedFiles.length} files)` : ''}`}
-          </button>
+          {showConfirm && includedFiles.length > 0 && !createMutation.isPending ? (
+            <div style={{ textAlign: 'left', border: '1.5px solid var(--accent-primary)', borderRadius: 'var(--radius-md)', padding: '1rem', marginBottom: '1rem', background: 'var(--accent-light)' }}>
+              <div style={{ fontSize: '0.85rem', color: 'var(--text-primary)', marginBottom: '0.85rem' }}>
+                {mode === 'append' && targetDevice ? (
+                  <>Add <strong>{includedFiles.length}</strong> file{includedFiles.length > 1 ? 's' : ''} to <strong>{targetDevice.pack_name}</strong> ({targetDevice.serial_number})? Its existing data stays as-is — this only adds new batches alongside it.</>
+                ) : (
+                  <>Create a new battery{packName ? <> called <strong>{packName}</strong></> : ''} from <strong>{includedFiles.length}</strong> file{includedFiles.length > 1 ? 's' : ''}? {requestedDeviceId && targetDevice ? <>{targetDevice.pack_name} is not affected.</> : ''}</>
+                )}
+              </div>
+              <div style={{ display: 'flex', gap: '0.6rem' }}>
+                <button
+                  className="btn-primary"
+                  style={{ flex: 1, padding: '0.7rem' }}
+                  onClick={handleConfirmedSubmit}
+                >
+                  Confirm &amp; Upload
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowConfirm(false)}
+                  style={{ flex: 1, padding: '0.7rem', background: 'transparent', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', color: 'var(--text-secondary)', cursor: 'pointer' }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              className="btn-primary"
+              style={{ width: '100%', padding: '1rem', fontSize: '1rem' }}
+              disabled={includedFiles.length === 0 || createMutation.isPending}
+              onClick={handlePrimaryClick}
+            >
+              {createMutation.isPending
+                ? (mode === 'append' ? 'Adding & analyzing…' : 'Creating & analyzing…')
+                : mode === 'append' && targetDevice
+                  ? `Add${includedFiles.length > 1 ? ` ${includedFiles.length} files` : ' Data'} to ${targetDevice.pack_name}`
+                  : `Create Battery & Analyze${includedFiles.length > 1 ? ` (${includedFiles.length} files)` : ''}`}
+            </button>
+          )}
 
           <div style={{ marginTop: '2rem', textAlign: 'left', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
             <h4 style={{ fontWeight: 600, color: 'var(--text-primary)', marginBottom: '0.5rem' }}>Expected CSV Format</h4>
