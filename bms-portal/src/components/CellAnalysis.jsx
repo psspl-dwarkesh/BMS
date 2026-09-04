@@ -109,7 +109,7 @@ export default function CellAnalysis() {
   const { id } = useParams();
 
   const { data: latest, isLoading } = useQuery({
-    queryKey: ['telemetry-latest-cells', id],
+    queryKey: ['telemetry-latest', id],
     queryFn: () => telemetryApi.getLatest(id),
     refetchInterval: 1000,
     enabled: !!id

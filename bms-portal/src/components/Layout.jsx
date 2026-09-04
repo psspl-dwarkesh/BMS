@@ -1,65 +1,98 @@
 import { useState, useRef, useEffect } from 'react';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { Globe, Users, Battery, Activity, AlertTriangle, Thermometer, Upload, FileText, Search, Bell, Settings, X, LogOut, Menu, Shield, Zap, CheckCircle2 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { alertsApi, devicesApi } from '../api/endpoints';
 import Select from './common/Select';
 
-// WebSocket connection hook
+const WS_RECONNECT_BASE_MS = 1000;
+const WS_RECONNECT_MAX_MS = 30000;
+
+// WebSocket connection hook — reconnects with exponential backoff on an
+// unexpected drop (network blip, server restart), instead of silently
+// staying disconnected until a full page reload. A manual close (component
+// unmount) sets `closedByUs` so onclose doesn't try to reconnect a socket
+// that was intentionally torn down.
 export function useLiveSocket() {
   const { user } = useAuth();
   const [liveAlerts, setLiveAlerts] = useState([]);
   const [unreadAlerts, setUnreadAlerts] = useState(false);
   const [socket, setSocket] = useState(null);
+  const [connected, setConnected] = useState(false);
 
   useEffect(() => {
     if (!user) return;
-    
-    const token = localStorage.getItem('bms_token');
-    
-    let baseWsUrl;
-    if (import.meta.env.VITE_API_BASE_URL) {
-      baseWsUrl = import.meta.env.VITE_API_BASE_URL.replace('http', 'ws');
-    } else if (import.meta.env.DEV) {
-      baseWsUrl = 'ws://localhost:8000';
-    } else {
-      baseWsUrl = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}`;
-    }
-    
-    const wsUrl = `${baseWsUrl}/ws/alerts?token=${token}`;
-    
-    const ws = new WebSocket(wsUrl);
-    
-    ws.onopen = () => {
-      console.log('Live socket connected');
-    };
-    
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        if (data.type === 'ALERT') {
-          setLiveAlerts(prev => [data, ...prev].slice(0, 50));
-          setUnreadAlerts(true);
-        } else if (data.type === 'ALERT_RESOLVED') {
-          setLiveAlerts(prev => prev.filter(a => a.alert_id !== data.alert_id));
-        }
-      } catch (e) {
-        console.error("Failed to parse websocket message", e);
+
+    let ws = null;
+    let closedByUs = false;
+    let reconnectTimer = null;
+    let attempt = 0;
+
+    const connect = () => {
+      const token = localStorage.getItem('bms_token');
+
+      let baseWsUrl;
+      if (import.meta.env.VITE_API_BASE_URL) {
+        baseWsUrl = import.meta.env.VITE_API_BASE_URL.replace('http', 'ws');
+      } else if (import.meta.env.DEV) {
+        baseWsUrl = 'ws://localhost:8000';
+      } else {
+        baseWsUrl = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}`;
       }
+
+      const wsUrl = `${baseWsUrl}/ws/alerts?token=${token}`;
+      ws = new WebSocket(wsUrl);
+
+      ws.onopen = () => {
+        console.log('Live socket connected');
+        attempt = 0;
+        setConnected(true);
+        setSocket(ws);
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === 'ALERT') {
+            setLiveAlerts(prev => [data, ...prev].slice(0, 50));
+            setUnreadAlerts(true);
+          } else if (data.type === 'ALERT_RESOLVED') {
+            setLiveAlerts(prev => prev.filter(a => a.alert_id !== data.alert_id));
+          }
+        } catch (e) {
+          console.error("Failed to parse websocket message", e);
+        }
+      };
+
+      ws.onclose = () => {
+        console.log('Live socket disconnected');
+        setConnected(false);
+        setSocket(null);
+        if (closedByUs) return;
+        // Exponential backoff, capped, so a persistently-unavailable server
+        // doesn't spin a tight reconnect loop.
+        const delay = Math.min(WS_RECONNECT_BASE_MS * 2 ** attempt, WS_RECONNECT_MAX_MS);
+        attempt += 1;
+        reconnectTimer = setTimeout(connect, delay);
+      };
+
+      ws.onerror = () => {
+        // onclose fires right after for a connection-level error - no
+        // separate handling needed here beyond letting that path reconnect.
+      };
     };
-    
-    ws.onclose = () => {
-      console.log('Live socket disconnected');
-    };
-    
-    setSocket(ws);
-    
+
+    connect();
+
     return () => {
-      ws.close();
+      closedByUs = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (ws) ws.close();
     };
   }, [user]);
 
-  return { socket, liveAlerts, setLiveAlerts, unreadAlerts, setUnreadAlerts };
+  return { socket, connected, liveAlerts, setLiveAlerts, unreadAlerts, setUnreadAlerts };
 }
 
 export default function Layout() {
@@ -70,33 +103,37 @@ export default function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
-  const [devices, setDevices] = useState([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState('');
-  
+
   const profileRef = useRef(null);
   const notifRef = useRef(null);
-  
+
   const { liveAlerts, unreadAlerts, setUnreadAlerts } = useLiveSocket();
 
-  // Load devices for the sidebar picker
+  // Shared react-query cache for the sidebar's device list - was previously
+  // a raw devicesApi.getDevices() call re-run on every route/tab navigation
+  // (its effect depended on location.pathname), duplicating the independent
+  // ['devices'] fetches FleetDashboard/DeviceManagement/UserManagement
+  // already do. One cached fetch, shared across all of them, staying fresh
+  // for 30s before a background refetch.
+  const { data: devices = [] } = useQuery({
+    queryKey: ['devices'],
+    queryFn: devicesApi.getDevices,
+    enabled: !!user,
+    staleTime: 30000,
+  });
+
+  // Pick the selected device from the current URL, or default non-admins
+  // straight to their (usually only) assigned device.
   useEffect(() => {
-    const fetchDevices = async () => {
-      try {
-        const data = await devicesApi.getDevices();
-        setDevices(data);
-        // Extract device id from current URL if present
-        const match = location.pathname.match(/\/devices\/(\d+)/);
-        if (match) {
-          setSelectedDeviceId(match[1]);
-        } else if (data.length > 0 && user.role !== 'admin') {
-          setSelectedDeviceId(data[0].id.toString());
-        }
-      } catch (err) {
-        console.error('Failed to load devices', err);
-      }
-    };
-    if (user) fetchDevices();
-  }, [user, location.pathname]);
+    if (!user || devices.length === 0) return;
+    const match = location.pathname.match(/\/devices\/(\d+)/);
+    if (match) {
+      setSelectedDeviceId(match[1]);
+    } else if (user.role !== 'admin') {
+      setSelectedDeviceId(devices[0].id.toString());
+    }
+  }, [user, devices, location.pathname]);
 
   // Close dropdowns when clicking outside
   useEffect(() => {

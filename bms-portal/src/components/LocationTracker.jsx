@@ -14,7 +14,7 @@ export default function LocationTracker() {
   const { id } = useParams();
 
   const { data: latest, isLoading } = useQuery({
-    queryKey: ['telemetry-latest-loc', id],
+    queryKey: ['telemetry-latest', id],
     queryFn: () => telemetryApi.getLatest(id),
     refetchInterval: 2000,
     enabled: !!id

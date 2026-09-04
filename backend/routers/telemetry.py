@@ -2,8 +2,10 @@
 import datetime
 import io
 import csv
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session, joinedload
 import pandas as pd
@@ -15,6 +17,11 @@ from ingestion import check_telemetry_thresholds
 from ws_manager import manager
 
 router = APIRouter(prefix="/api/v1/devices/{device_id}/telemetry", tags=["telemetry"])
+log = logging.getLogger("bms.telemetry")
+
+# Cap on rows streamed per history export (demo safety limit - see
+# export_history_csv).
+EXPORT_ROW_LIMIT = 100_000
 
 # Cap on rows written per CSV import (demo safety limit, see
 # _process_import_in_background) - keep the endpoint's reported row count in
@@ -155,7 +162,10 @@ def export_history_csv(
         q = q.filter(Telemetry.sample_time >= datetime.datetime.fromisoformat(start.replace('Z', '+00:00')))
     if end:
         q = q.filter(Telemetry.sample_time <= datetime.datetime.fromisoformat(end.replace('Z', '+00:00')))
-    q = q.order_by(Telemetry.sample_time.desc())
+    # Unbounded before: omitting start/end (or passing a huge range) streamed
+    # the device's entire telemetry history in one response. Streaming keeps
+    # memory bounded but not DB/CPU time, so cap the row count too.
+    q = q.order_by(Telemetry.sample_time.desc()).limit(EXPORT_ROW_LIMIT)
 
     # We use yield to stream the CSV row by row so we don't blow up memory on large ranges
     def iter_csv():
@@ -237,6 +247,7 @@ def _process_import_in_background(device_id: int, df_json: str):
         BATCH_SIZE = 200
         pending: list[tuple[Telemetry, list[dict]]] = []
         rows_written = 0
+        rows_skipped = 0
         latest = None  # (Telemetry, fields, sample_time, cell_readings_data) for the most-recent row seen
 
         def flush_batch():
@@ -263,67 +274,79 @@ def _process_import_in_background(device_id: int, df_json: str):
 
         # Limit rows for safety in this demo
         for idx, row in df.head(IMPORT_ROW_LIMIT).iterrows():
-            sample_time = datetime.datetime.utcnow()
-            if time_col and pd.notnull(row[time_col]):
-                try:
-                    sample_time = pd.to_datetime(row[time_col]).to_pydatetime()
-                except:
-                    pass
-                    
-            fields = {
-                "pack_voltage": float(row[v_col]) if v_col and pd.notnull(row[v_col]) else None,
-                "pack_current": float(row[c_col]) if c_col and pd.notnull(row[c_col]) else None,
-                "soc": float(row[soc_col]) if soc_col and pd.notnull(row[soc_col]) else None,
-                "soh": float(row[soh_col]) if soh_col and pd.notnull(row[soh_col]) else None,
-            }
-            
-            # Extract cell readings
-            cell_readings_data = []
-            max_cells = max(len(cell_v_cols), len(cell_t_cols))
-            
-            for i in range(max_cells):
-                v = None
-                if i < len(cell_v_cols) and pd.notnull(row[cell_v_cols[i]]):
-                    v = float(row[cell_v_cols[i]])
-                    if v < 100: v *= 1000 # Convert V to mV if needed
-                
-                t = None
-                if i < len(cell_t_cols) and pd.notnull(row[cell_t_cols[i]]):
-                    t = float(row[cell_t_cols[i]])
-                    
-                if v is not None or t is not None:
-                    cell_readings_data.append({
-                        "cell_number": i + 1,
-                        "voltage_mv": v,
-                        "temperature_c": t
-                    })
-                    
-            if cell_readings_data:
-                # Calculate extremes
-                v_vals = [cr["voltage_mv"] for cr in cell_readings_data if cr["voltage_mv"] is not None]
-                t_vals = [cr["temperature_c"] for cr in cell_readings_data if cr["temperature_c"] is not None]
-                
-                if v_vals:
-                    fields["max_cell_voltage"] = max(v_vals) / 1000.0
-                    fields["min_cell_voltage"] = min(v_vals) / 1000.0
-                    fields["avg_cell_voltage"] = (sum(v_vals) / len(v_vals)) / 1000.0
-                    
-                if t_vals:
-                    fields["max_thermistor_temp"] = max(t_vals)
-                    fields["min_thermistor_temp"] = min(t_vals)
-                    fields["avg_cell_temp"] = sum(t_vals) / len(t_vals)
-            
-            trow = Telemetry(
-                device_id=device.id,
-                sample_time=sample_time,
-                source=TelemetrySource.csv_import,
-                **fields,
-            )
-            pending.append((trow, cell_readings_data))
-            if latest is None or sample_time >= latest[2]:
-                latest = (trow, fields, sample_time, cell_readings_data)
-            if len(pending) >= BATCH_SIZE:
-                flush_batch()
+            # Per-row try/except: a single malformed row (e.g. a non-numeric
+            # value in a column we expect to be numeric) used to propagate
+            # all the way up to the outer except below, which rolled back
+            # only the *current* not-yet-committed batch - any earlier
+            # batches were already flush_batch()-committed, so the import
+            # silently ended up partial with no record of where it stopped.
+            # Skipping just the bad row keeps the rest of a large, mostly-
+            # good file intact instead of losing it to one outlier.
+            try:
+                sample_time = datetime.datetime.utcnow()
+                if time_col and pd.notnull(row[time_col]):
+                    try:
+                        sample_time = pd.to_datetime(row[time_col]).to_pydatetime()
+                    except Exception:
+                        pass
+
+                fields = {
+                    "pack_voltage": float(row[v_col]) if v_col and pd.notnull(row[v_col]) else None,
+                    "pack_current": float(row[c_col]) if c_col and pd.notnull(row[c_col]) else None,
+                    "soc": float(row[soc_col]) if soc_col and pd.notnull(row[soc_col]) else None,
+                    "soh": float(row[soh_col]) if soh_col and pd.notnull(row[soh_col]) else None,
+                }
+
+                # Extract cell readings
+                cell_readings_data = []
+                max_cells = max(len(cell_v_cols), len(cell_t_cols))
+
+                for i in range(max_cells):
+                    v = None
+                    if i < len(cell_v_cols) and pd.notnull(row[cell_v_cols[i]]):
+                        v = float(row[cell_v_cols[i]])
+                        if v < 100: v *= 1000 # Convert V to mV if needed
+
+                    t = None
+                    if i < len(cell_t_cols) and pd.notnull(row[cell_t_cols[i]]):
+                        t = float(row[cell_t_cols[i]])
+
+                    if v is not None or t is not None:
+                        cell_readings_data.append({
+                            "cell_number": i + 1,
+                            "voltage_mv": v,
+                            "temperature_c": t
+                        })
+
+                if cell_readings_data:
+                    # Calculate extremes
+                    v_vals = [cr["voltage_mv"] for cr in cell_readings_data if cr["voltage_mv"] is not None]
+                    t_vals = [cr["temperature_c"] for cr in cell_readings_data if cr["temperature_c"] is not None]
+
+                    if v_vals:
+                        fields["max_cell_voltage"] = max(v_vals) / 1000.0
+                        fields["min_cell_voltage"] = min(v_vals) / 1000.0
+                        fields["avg_cell_voltage"] = (sum(v_vals) / len(v_vals)) / 1000.0
+
+                    if t_vals:
+                        fields["max_thermistor_temp"] = max(t_vals)
+                        fields["min_thermistor_temp"] = min(t_vals)
+                        fields["avg_cell_temp"] = sum(t_vals) / len(t_vals)
+
+                trow = Telemetry(
+                    device_id=device.id,
+                    sample_time=sample_time,
+                    source=TelemetrySource.csv_import,
+                    **fields,
+                )
+                pending.append((trow, cell_readings_data))
+                if latest is None or sample_time >= latest[2]:
+                    latest = (trow, fields, sample_time, cell_readings_data)
+                if len(pending) >= BATCH_SIZE:
+                    flush_batch()
+            except Exception:
+                rows_skipped += 1
+                log.warning("CSV import for device %s: skipped row %s (malformed data)", device_id, idx, exc_info=True)
 
         flush_batch()  # final partial batch
         device.last_seen_at = datetime.datetime.utcnow()
@@ -341,10 +364,18 @@ def _process_import_in_background(device_id: int, df_json: str):
             check_telemetry_thresholds(db, device.id, latest_trow.id, latest_fields, latest_cells)
 
         db.commit()
-        print(f"CSV import for device {device_id}: {rows_written} rows written.")
+        if rows_skipped:
+            log.warning("CSV import for device %s: %s rows written, %s rows skipped (malformed data).", device_id, rows_written, rows_skipped)
+        else:
+            log.info("CSV import for device %s: %s rows written.", device_id, rows_written)
 
-    except Exception as e:
-        print(f"Error importing CSV: {e}")
+    except Exception:
+        # A fatal error here (as opposed to a per-row one, handled above) -
+        # e.g. the device disappearing mid-import, or a DB error - still
+        # rolls back whatever's pending, but is now a real log entry
+        # (captured by whatever log aggregation the deployment has) instead
+        # of a print() that most production setups never see.
+        log.exception("CSV import for device %s failed and was rolled back.", device_id)
         db.rollback()
     finally:
         db.close()
@@ -365,7 +396,11 @@ async def import_csv_telemetry(
         
     contents = await file.read()
     try:
-        df = pd.read_csv(io.StringIO(contents.decode('utf-8')))
+        # pd.read_csv is a blocking, synchronous call - running it directly
+        # in this async handler would stall the event loop (and every other
+        # concurrent request/WebSocket tick) for the duration of the parse,
+        # which matters once files get large. run_in_threadpool offloads it.
+        df = await run_in_threadpool(pd.read_csv, io.StringIO(contents.decode('utf-8')))
         df_json = df.to_json(orient="records")
         background_tasks.add_task(_process_import_in_background, device_id, df_json)
 

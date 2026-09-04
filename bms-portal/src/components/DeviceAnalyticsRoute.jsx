@@ -29,10 +29,23 @@ export default function DeviceAnalyticsRoute({ component: Component, propName = 
       <EmptyState
         icon={FileSearch}
         title="No telemetry history yet"
-        message="This device hasn't reported any data yet, or its live/simulated telemetry hasn't started. Check back shortly, or import a historical CSV from the Data Ingestion tab."
+        message="This device hasn't reported any data yet, or its live/simulated telemetry hasn't started."
       />
     );
   }
 
-  return <Component {...{ [propName]: analytics }} />;
+  return (
+    <>
+      {analytics.isPartialWindow && (
+        <div
+          className="badge badge-neutral"
+          style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', marginBottom: '1rem', padding: '0.5rem 0.85rem' }}
+          title="This device has more history than is shown here. Trends and totals below reflect only this recent window, not the device's full lifetime."
+        >
+          Showing the most recent {analytics.windowRowCount.toLocaleString()} samples — this device has more history than fits this view
+        </div>
+      )}
+      <Component {...{ [propName]: analytics }} />
+    </>
+  );
 }
