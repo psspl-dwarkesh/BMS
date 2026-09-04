@@ -1,119 +1,134 @@
 # BMS Portal — Current Status & Roadmap
 
-> **Last Updated:** 2026-09-03
+> **Last Updated:** 2026-09-04
 
 This snapshot reflects what's actually in the repo right now, not the original plan — see
 [frontend-standards.md](frontend-standards.md) for the component inventory it's based on.
+
+> Superseded note: earlier versions of this doc described a client-side-only demo where the
+> FastAPI backend existed but wasn't called by the UI. That's no longer true — the backend is a
+> real, persistent system of record and the frontend is wired to it end-to-end (auth, devices,
+> telemetry, alerts, live WebSocket updates).
 
 ---
 
 ## How the app actually works today
 
-The portal is **almost entirely a client-side analytics tool**. `App.jsx` gates the UI through
-`landing → login → portal (Layout)`, and once inside, every tab reads from a single
-`analyticsData` object produced by [csvParser.js](../bms-portal/src/utils/csvParser.js) — parsed
-and computed entirely in the browser with PapaParse. The FastAPI backend runs alongside it but
-**is not called by any of these flows**; the only backend touchpoint from the UI is a WebSocket
-connection for live alerts, which stays empty unless something else hits the upload endpoint
-separately.
+`App.jsx` gates the UI through `landing → login → portal (Layout)`. Login is real: `POST
+/api/v1/auth/login` checks a bcrypt-hashed password against the `users` table and issues a
+genuine signed JWT (see [security.md](#) / `backend/auth.py`), not a mock token. Everything inside
+the portal — the fleet list, per-device telemetry, alerts, CSV import — is a real HTTP/WebSocket
+call to the FastAPI backend, backed by SQLAlchemy models (`Device`, `Telemetry`, `CellReading`,
+`Alert`, `User`, `DeviceAssignment`) persisted in SQLite.
 
-### Frontend — real & working (client-side)
-- [x] Landing page → mock-login → portal flow (`App.jsx`, `LandingPage.jsx`, `LoginPage.jsx`)
-- [x] Portal layout with sidebar nav, topbar, notifications dropdown, settings/profile/access-control modals (`Layout.jsx`)
-- [x] Fleet Overview, Single Pack Dashboard, Data Quality, Cell Analysis, Degradation, Thermal, Alerts, Findings & Outputs tabs
-- [x] CSV upload with drag-and-drop, multi-file queueing, two bundled "predefined validation case" datasets, and a default sample dataset auto-loaded on login (`DataIngestion.jsx`, `csvParser.js`)
-- [x] Column auto-detection by header keyword matching (`voltage`, `current`, `temp`, `soc`, `cell`, `cycle`, etc.) — not a configurable mapping UI
-- [x] Data Quality scoring (missing signals, invalid values incl. a proportional score penalty, timestamp gaps) with a Good/Limited/Insufficient tier, computed from the parsed CSV
-- [x] Cell Analysis: interactive 3D WebGL pack viewer + voltage bar chart + temperature distribution bar chart, all sized to however many `CellN_Voltage`/`CellN_Temp` columns the CSV actually has (never a fixed 96) — plus weakest/strongest-cell KPIs
-- [x] Time-series charts (Voltage, Current, SOC, Cell Spread) via Recharts
-- [x] Degradation view: SOH/capacity-fade curve driven by an in-browser Extended Kalman Filter over Coulomb-counted throughput when the CSV lacks SOH/Capacity columns; reads them directly when present. SOH and Capacity are labeled measured/estimated independently (a CSV can have one without the other)
-- [x] Dedicated Thermal Analysis tab (`ThermalAnalysis.jsx`): pack temp KPIs, temp-vs-time chart, cell-to-cell temperature difference chart, thermal-anomaly table — all null-safe when temperature data is absent
-- [x] Anomaly detection (9 types, client-side): cell voltage imbalance, per-cell over/under-voltage, pack over-temperature, cell over-temperature, cell-to-cell temperature imbalance, statistical current outliers, abnormal degradation pattern (measured SOH only), and low data-quality-score
-- [x] Automated Findings & Outputs tab (`AutomatedFindings.jsx`): plain-language Key Findings generated from the actual computed KPIs/anomalies, plus an Integration View mapping available outputs to potential BMS/vehicle-control use cases (filtered to what this CSV actually supports)
-- [x] PDF and CSV report export (`ReportGenerator.jsx`, via jsPDF) — includes Key Findings, the full anomaly list, and weakest/strongest-cell + cell-temp-spread KPIs, not just a 5-row preview
-- [x] Black & white enterprise theme, responsive layout
-- [x] In-app documentation view (`Documentation.jsx`), incl. visual on-board/cloud/hybrid deployment diagrams and an outputs → vehicle-control mapping reference page
+### Two ways data gets into the system
+1. **Upload & Analyze** (`/app/upload`, `DataIngestion.jsx`) — the primary demo flow. Drop one or
+   more CSV files (or pick a bundled sample dataset); each file is parsed client-side just far
+   enough to preview its detected signals (voltage/current/SOC/SOH/cycle/cell count) and can be
+   individually included/excluded/removed before submitting. On submit, a **new device is created**
+   sized from the first file's detected cell/thermistor count, and every included file is imported
+   into it in order — then the user lands straight on that device's Automated Analytics Report
+   (Findings tab). This is a *cold-start* flow: no device has to exist beforehand.
+2. **Live simulator** (`backend/simulator.py`) — generates realistic per-device telemetry ticks and
+   pushes them over `/ws/alerts`, feeding the Realtime/Cell Analysis/Location tabs for a device as
+   if it were physically connected. **Off by default** (`SIMULATOR_ENABLED=false`) since this is
+   framed as an upload-and-analyze demo, not a live-telemetry product — one env var away if a
+   live-mode demo is wanted.
 
-### Frontend — mocked / simulated (worth knowing before you build on it)
-- **Login has no real backend.** `LoginPage.jsx` checks against 3 hardcoded users
-  (admin/engineer/viewer) and issues a self-signed, unverified "JWT" (`btoa` payload + a literal
-  `"mock-signature-do-not-use-in-production"`). The "Google"/"Microsoft" SSO buttons are a 1.2s
-  `setTimeout` that fabricates a token — no OAuth flow exists.
-- **Fleet Overview is 100% fake data.** `FleetDashboard.jsx` generates 256 random packs
-  (`Math.random()`) on every mount; it has no relationship to the `GET /api/v1/packs` endpoint or
-  any uploaded dataset.
-- **Client-side SOH is still a heuristic, not a validated model.** `csvParser.js` reads SOH/Capacity
-  directly from the CSV when present (labeled "measured"); otherwise it derives them from an
-  Extended Kalman Filter over Coulomb-counted throughput assuming a 50Ah nominal pack (labeled
-  "estimated"). No fallback is ever presented as measured, and no value is fabricated when there's
-  no signal to base it on — but the EKF itself is still a heuristic filter, not a trained/validated
-  battery model (the backend's `/predict/rul` RandomForestRegressor is the closer-to-real one; the
-  frontend doesn't call it — see the gap list below).
-- **Custom Alert Rules, Access Control (user list), and Profile editing** in the settings modals
-  are UI-only — nothing is persisted or enforced.
-- Two dead/unused components remain in the tree: `Sidebar.jsx` and `FileUpload.jsx` (superseded by
-  the inline sidebar in `Layout.jsx` and the upload UI in `DataIngestion.jsx`).
+The old per-device "Historical Data Ingestion" page (`/app/devices/:id/upload`, for backfilling an
+*existing* device) was removed as a duplicate of Upload & Analyze — see git history around
+`39ad393` for the removal and the merge that unified the two flows' single component.
 
-### Backend — real but not wired to the frontend
-- [x] FastAPI server with CORS, SQLite (`bms_analytics.db`) via SQLAlchemy
-- [x] `POST /api/v1/packs/upload` — parses a CSV, stores **only the first 50 rows** per pack, with
-  SOC/temperature hardcoded to placeholder values (`100.0` / `25.0`); dispatches a background task
-- [x] `GET /api/v1/packs` — lists stored packs (nothing currently populates it from the UI)
-- [x] `POST /api/v1/predict/rul` — SOH/RUL prediction, backed by a RandomForestRegressor
-  (`backend/ml_models/soh_capacity_model.joblib`) retrained on the real NASA Li-ion discharge
-  dataset from [battery_aging-master](../battery_aging-master/battery_aging-master); see
-  `ml_inference.py` for the feature engineering and its documented caveats (assumed sampling
-  interval, single-sample RUL extrapolation using a population-average fade rate)
-- [x] `WS /ws/alerts` — broadcasts ISO-26262-style threshold violations found by the background task; this is what `Layout.jsx` connects to for the "Real-Time System Alerts" panel
-- [x] Static file serving of the production build + SPA fallback
+### Frontend — real & working, calling the real backend
+- [x] Landing page → real login (JWT) → portal flow (`App.jsx`, `LandingPage.jsx`, `LoginPage.jsx`),
+  with "Quick Login" demo buttons for the two seeded demo accounts
+- [x] Portal layout with sidebar nav, device picker (with a "deselect" option back to fleet view),
+  topbar, live alerts panel over WebSocket (`Layout.jsx`)
+- [x] Admin-only: Fleet Overview (real device list, not mock data), User Management, Device
+  Registry, Fleet Alerts
+- [x] Per-device tabs: Real-Time Live, Device History (with CSV export), Cell Analysis, GPS
+  Tracking, Degradation, Data Quality, Thermal, Findings (Automated Findings & Outputs), Alerts,
+  Reports (PDF/CSV export)
+- [x] Upload & Analyze (`/app/upload`): multi-CSV batch upload with per-file preview/include/remove,
+  auto-creates a device and imports every included file, lands on the new device's report
+- [x] Column auto-detection by header keyword matching (voltage/current/temp/soc/cell/cycle etc.)
+- [x] Data Quality scoring, Cell Analysis (3D pack viewer sized to actual CSV cell count),
+  Degradation (EKF-derived SOH/capacity fade when the CSV lacks the signal, labeled
+  measured/estimated), Thermal Analysis, 9-type anomaly detection, Automated Findings, PDF/CSV
+  report export — all computed from data fetched from the backend via `useDeviceAnalytics.js`
+- [x] In-app documentation view (`Documentation.jsx`), including a diagram of the Upload & Analyze
+  flow and the deployment-architecture options
+- [x] RBAC: **admin** (full fleet access) and **user** (assigned devices only) — enforced both by
+  route guards (`RequireAuth adminOnly`) and backend `require_admin`/`get_scoped_device` checks
 
-### Backend — mocked / simulated
-- **Anomaly detection worker (`tasks.py`) is FastAPI `BackgroundTasks`, not a real queue.** The
-  code explicitly notes it's standing in for Celery + Redis ("to avoid requiring a local Redis
-  installation on Windows") and adds an artificial 2s `sleep` to simulate queue latency.
-- **The upload endpoint's column mapping is hardcoded** (first column containing `voltage`/
-  `current`), not the mapping the frontend computes.
+### Frontend — known limitations (worth knowing before you build on it)
+- Device-scoped analytics tabs (Degradation/Thermal/Data Quality/Findings) are computed over the
+  **most recent 500 telemetry rows only** (`useDeviceAnalytics.js`), with no indication in the UI
+  that this is a recent-window rather than lifetime stat — a device with years of history will
+  show trends only over its last 500 samples.
+- The WebSocket live-alerts connection has no reconnect logic; a dropped connection (network blip,
+  server restart) silently stops live alerts until a full page reload.
+- Large CSV parsing (PapaParse) runs synchronously on the main thread — a big file will visibly
+  freeze the UI during the pre-upload preview.
+- The Fleet Overview table caps at 50 rows with a "Showing 50 of N" note but no further pagination
+  — refine the search to see more.
+- `predictApi.getRul` (backend `/predict/rul`, a trained RandomForestRegressor for SOH/RUL) and the
+  historical per-cell drill-down endpoint exist and work, but aren't called from any UI yet.
+
+### Backend — real, persistent, wired to the frontend
+- [x] FastAPI server, SQLite (`bms_analytics.db`) via SQLAlchemy; auto-creates tables and
+  auto-seeds two demo accounts (`admin@bms.local` / `user@bms.local`) on a completely empty DB —
+  deliberate for this public demo instance (the login page's own "Quick Login" buttons use these
+  exact credentials), not an oversight
+- [x] `POST /api/v1/auth/login`, `GET /api/v1/auth/me` — real bcrypt + JWT auth
+- [x] `GET/POST/PATCH /api/v1/devices` — device CRUD, role-scoped listing (batched — one query for
+  the latest telemetry across all devices, not one per device)
+- [x] `GET /api/v1/devices/{id}/telemetry/latest|history|history/export`,
+  `POST /api/v1/devices/{id}/telemetry/import` — CSV import runs as a background task with batched
+  inserts (200 rows/commit), capped at 1000 rows/import for this demo (the response reports how
+  many rows were actually accepted if the file was larger)
+- [x] `GET /api/v1/devices/{id}/location/history` — GPS trace, capped at the most recent 2000 points
+- [x] `GET/POST /api/v1/alerts`, `.../acknowledge` — capped at 500 most-recent rows
+- [x] `POST /api/v1/devices/{id}/predict/rul` — SOH/RUL prediction via a RandomForestRegressor
+  trained on the real NASA Li-ion discharge dataset (not yet called from the UI)
+- [x] `WS /ws/alerts` — authenticated (JWT via query param), broadcasts real threshold-violation
+  alerts as they're generated by either the simulator or a CSV import's latest row
+- [x] `backend/simulator.py` — per-device live telemetry generator, gated off by default
+- [x] Static file serving of the production build + SPA fallback (single-service deploy on Render)
+
+### Backend — known limitations
+- Device-scoped analytics endpoints don't paginate beyond simple `page`/`page_size` on history;
+  a few endpoints (alerts, location) only recently got a safety cap rather than real pagination.
+- `Alert.telemetry_id`'s foreign key has no `ondelete` rule — a future telemetry-retention/cleanup
+  feature that deletes old `Telemetry` rows would need this addressed first (currently blocked by
+  FK enforcement rather than silently orphaning, which is safer but still needs a real fix).
+- Several `String` columns have no explicit length limit — harmless on SQLite (this demo's DB) but
+  will need attention if the app ever moves to PostgreSQL, which nothing here currently blocks.
+- No end-to-end test suite exists yet.
 
 ---
 
 ## 🔄 In Progress / Known Gaps
 
-- [ ] Frontend never calls the backend — CSV upload, RUL prediction, and pack listing are two
-  disconnected systems today. Wiring `DataIngestion.jsx` to `POST /api/v1/packs/upload` (or
-  removing the backend from the pitch) is the biggest structural gap.
-- [ ] Real authentication (backend-issued, verified JWT; no hardcoded credentials)
-- [ ] Fleet Overview backed by real pack records instead of random data
-- [ ] Client-side SOH (the Dashboard/Degradation tabs' EKF heuristic) still needs to move to a
-  trained/validated model — the backend's `/predict/rul` now has one, but nothing in the UI calls
-  it yet
-- [ ] Backend CSV ingestion beyond the first 50 rows, with real SOC/temperature extraction, and
-  storing per-row sample timestamps so RUL feature extraction can use real elapsed time instead of
-  an assumed sampling interval
+- [ ] Wire `predictApi.getRul` (backend already supports it) into a device tab — the ML model is
+  trained and working, just not surfaced in the UI yet
+- [ ] WebSocket reconnect/backoff logic for the live-alerts connection
+- [ ] Real pagination (not just a row cap) for alerts, location history, and analytics-tab history
+  so a long-lived device's full history is genuinely reachable, not just its most recent window
+- [ ] Move large-CSV client-side parsing off the main thread (Web Worker) so a big upload doesn't
+  visibly freeze the UI during preview
 
 ---
 
 ## 📋 Next Milestones
 
-### Milestone 2 — Backend Analytics
-- [ ] Server-side CSV processing with Pandas (beyond the current 50-row demo limit)
-- [x] SOH/capacity estimation using a trained ML model (`/api/v1/predict/rul`, RandomForestRegressor
-  on the NASA discharge dataset) — replaces the untrained-LSTM fallback
-- [ ] Frontend actually calling backend analytics endpoints
-- [ ] Database storage for computed analytics
-
-### Milestone 3 — Advanced Features
-- [x] RUL (Remaining Useful Life) prediction backed by a trained model (single-sample estimate,
-  extrapolated from a population-average fade rate — see known caveats in `ml_inference.py`)
-- [ ] Fleet-level monitoring backed by real multi-pack data (replace `FleetDashboard.jsx` mock data)
-- [ ] Real user authentication & role-based access (replace hardcoded `STATIC_USERS`)
-- [ ] Real Celery/Redis (or equivalent) task queue for anomaly detection, replacing `BackgroundTasks`
-
 ### Milestone 4 — Production Polish
-- [ ] OpenAPI/Swagger documentation
+- [ ] OpenAPI/Swagger documentation pass (FastAPI generates this automatically at `/docs`, but the
+  hand-rolled response dicts across routers aren't backed by shared Pydantic response models yet)
 - [ ] End-to-end testing suite (none exists today)
-- [ ] Performance optimization for large datasets
-- [ ] Deployment documentation (Docker/cloud)
-- [ ] Remove dead components (`Sidebar.jsx`, `FileUpload.jsx`) or wire them back in
+- [ ] Web Worker for large CSV client-side parsing
+- [ ] PostgreSQL migration path (add explicit column lengths, connection pool tuning) if/when this
+  moves off a single SQLite file
 
 ---
 
@@ -121,10 +136,10 @@ separately.
 
 | # | Issue | Severity | Status |
 |---|-------|----------|--------|
-| 1 | Client-side SOH/Capacity (Dashboard + Degradation tab) is an honestly-labeled EKF heuristic when the CSV lacks the signal, not a trained model | Medium | Needs real model (backend has one now, frontend doesn't call it) |
-| 2 | ~~Backend `/predict/rul` uses an untrained neural net blended with a heuristic~~ | ~~Medium~~ | Fixed — now a RandomForestRegressor trained on real NASA discharge data |
-| 3 | Backend only stores first 50 rows per upload | Low | Demo limitation |
-| 4 | Frontend does not call the backend for upload/predict — two disconnected systems | Medium | Needs integration |
-| 5 | Login/SSO is fully mocked (hardcoded users, fake JWT signature) | Medium | Needs real auth |
-| 6 | Fleet Overview shows randomly generated packs, not real data | Low | Demo limitation |
-| 7 | `Sidebar.jsx` and `FileUpload.jsx` are unused dead code | Low | Cleanup |
+| 1 | Analytics tabs (Degradation/Thermal/Quality/Findings) compute over the most recent 500 rows only, with no UI indication it's a partial window | Medium | Open |
+| 2 | WebSocket live-alerts connection has no reconnect logic | Medium | Open |
+| 3 | Large CSV parsing blocks the main thread (visible freeze on big files) | Low-Medium | Open |
+| 4 | `predict/rul` (trained SOH/RUL model) isn't called from any UI | Low | Backend ready, needs wiring |
+| 5 | `Alert.telemetry_id` FK has no `ondelete` rule | Low | Would block a future retention/cleanup feature |
+| 6 | Several `String` DB columns have no explicit length limit | Low | Fine on SQLite; needs attention before a Postgres migration |
+| 7 | Fleet Overview table caps at 50 rows with only a warning, no further pagination | Low | Open |

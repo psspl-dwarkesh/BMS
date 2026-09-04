@@ -80,7 +80,7 @@ export default function Documentation({ onBack }) {
             <p>Navigate to the login screen and select a role. For exploring all features, select the <strong>Admin</strong> or <strong>Engineer</strong> role.</p>
             
             <h3>2. Loading Data</h3>
-            <p>Upon login, the system connects to the backend API. The simulator provides live data streams, or you can use the <strong>Data Ingestion</strong> tab on a device to upload historical `.csv` telemetry.</p>
+            <p>Upon login, the system connects to the backend API. The fastest way to see the platform in action is <strong>Upload &amp; Analyze</strong> (admin sidebar) — drop one or more CSV telemetry logs (or pick a bundled sample dataset) and a new battery is created and analyzed automatically, no device setup required. See the diagram below for exactly what happens.</p>
 
             <h3>3. Exploring Insights</h3>
             <p>Once data is loaded, navigate through the sidebar to view:</p>
@@ -96,7 +96,25 @@ export default function Documentation({ onBack }) {
           <div className="animate-fade-in">
             <h1>Architecture & Analytics Workflow</h1>
             <p>The BMS Analytics Platform is designed to ingest raw BMS telemetry and convert it into actionable vehicle-control/calibration outputs.</p>
-            
+
+            <h2>Upload &amp; Analyze — the primary flow</h2>
+            <p>This is the platform's main entry point: no device has to exist beforehand. It supports more than one CSV per upload, since a real battery's telemetry often arrives as several logs rather than a single file.</p>
+            <DeploymentDiagram
+              title="Upload & Analyze (/app/upload)"
+              description="Every CSV added is parsed in the browser far enough to preview its signals before anything is sent to the backend; only files left toggled 'Include' are actually imported."
+            >
+              <DiagBox title="1. Add CSV(s)" subtitle="drag/drop, sample dataset, or file picker — one or many" />
+              <DiagArrow />
+              <DiagBox title="2. Preview & toggle" subtitle="detected signals per file · include / view / remove" accent="var(--accent-primary)" />
+              <DiagArrow />
+              <DiagBox title="3. Create battery" subtitle="device sized from cell/thermistor count" />
+              <DiagArrow />
+              <DiagBox title="4. Import each file" subtitle="in order, into the same device" />
+              <DiagArrow />
+              <DiagBox title="5. Automated Report" subtitle="Findings tab, generated instantly" accent="var(--accent-primary)" />
+            </DeploymentDiagram>
+            <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>All of a battery's CSVs are imported at creation time, in one Upload &amp; Analyze session — there's currently no separate "add more history to an existing battery" flow in the UI.</p>
+
             <h2>End-to-End Workflow</h2>
             <div style={{ background: 'var(--bg-sidebar)', color: '#fff', padding: '1.5rem', borderRadius: 'var(--radius-md)', overflowX: 'auto', marginBottom: '2rem' }}>
               <pre style={{ fontFamily: 'monospace', fontSize: '0.85rem', lineHeight: '1.2' }}>{`        BMS / Cell Data
@@ -261,22 +279,22 @@ BMS / Calibration / Vehicle-Control Evaluation`}</pre>
         return (
           <div className="animate-fade-in">
             <h1>Security & Role-Based Access</h1>
-            <p>The platform employs strict Role-Based Access Control (RBAC) to ensure data integrity and operational safety.</p>
-            
+            <p>The platform employs Role-Based Access Control (RBAC), enforced on both the frontend (route guards) and the backend (every request re-checks the caller's role and device assignments — the UI never has to be trusted).</p>
+
             <h2>Available Roles</h2>
             <div className="doc-card-grid">
               <div className="doc-card">
                 <h4>Admin</h4>
-                <p>Full system access. Can modify organization settings, manage user access control, and view all fleet data.</p>
+                <p>Full fleet access. Registers devices, manages users and device assignments, uploads new data via Upload &amp; Analyze, and can view/acknowledge alerts across the whole fleet.</p>
               </div>
               <div className="doc-card">
-                <h4>Engineer</h4>
-                <p>Standard operational access. Can upload new CSV datasets, generate reports, and configure personal notification settings.</p>
+                <h4>User</h4>
+                <p>Scoped to their assigned devices only (set by an admin via Device Registry). Can view real-time and historical data, reports, and alerts for those devices — no fleet-wide visibility, user management, or upload access.</p>
               </div>
-              <div className="doc-card">
-                <h4>Viewer</h4>
-                <p>Read-only access. Restricted from uploading new data or modifying any settings. Can only view dashboards and download reports.</p>
-              </div>
+            </div>
+
+            <div className="doc-note">
+              <strong>Note:</strong> Authentication is real, backend-issued and verified JWT (bcrypt-hashed passwords) — not a demo/mock token. The login page's "Quick Login" buttons sign in as one of two seeded demo accounts (<code>admin@bms.local</code> / <code>user@bms.local</code>) for this public demo instance.
             </div>
           </div>
         );

@@ -1,4 +1,4 @@
-import { Activity, ArrowRight, CheckCircle2, XCircle, Database, TrendingUp, AlertTriangle, Shield, Cpu, Zap, BarChart3, Thermometer, FileText, Battery, ChevronRight } from 'lucide-react';
+import { Activity, ArrowRight, CheckCircle2, XCircle, Database, TrendingUp, AlertTriangle, Shield, Cpu, Zap, BarChart3, Thermometer, FileText, Battery, ChevronRight, Upload, Eye, Sparkles } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 export default function LandingPage() {
@@ -31,6 +31,7 @@ export default function LandingPage() {
           </span>
         </div>
         <nav style={{ display: 'flex', gap: '2rem', fontSize: '0.875rem', color: 'var(--text-secondary)', fontWeight: '500' }}>
+          <span onClick={() => scrollTo('how-it-works')} style={{ cursor: 'pointer', transition: 'color 0.15s' }}>How It Works</span>
           <span onClick={() => scrollTo('overview')} style={{ cursor: 'pointer', transition: 'color 0.15s' }}>Platform</span>
           <span onClick={() => scrollTo('capabilities')} style={{ cursor: 'pointer', transition: 'color 0.15s' }}>Analytics</span>
           <span onClick={() => scrollTo('integration')} style={{ cursor: 'pointer', transition: 'color 0.15s' }}>Integration</span>
@@ -52,7 +53,7 @@ export default function LandingPage() {
             From raw BMS logs to<br />actionable battery insights.
           </h1>
           <p className="hero-subtitle">
-            Enterprise-grade intelligence layer for battery fleets. Upload CSV data, predict degradation, detect thermal anomalies, and optimize cell performance — all in one platform.
+            Enterprise-grade intelligence layer for battery fleets. Upload one or more BMS CSV logs, predict degradation, detect thermal anomalies, and optimize cell performance — all in one platform, with a full report generated automatically.
           </p>
           <div className="hero-actions">
             <button className="btn-primary" onClick={onEnter} style={{ padding: '0.85rem 2rem', fontSize: '1rem' }}>
@@ -76,6 +77,47 @@ export default function LandingPage() {
                 <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: '500' }}>{kpi.label}</div>
               </div>
             ))}
+          </div>
+        </div>
+      </section>
+
+      {/* How It Works */}
+      <section id="how-it-works" className="landing-section">
+        <div style={{ width: '92%', maxWidth: '1200px', margin: '0 auto' }}>
+          <div style={{ textAlign: 'center', marginBottom: '3rem' }}>
+            <div className="section-tag" style={{ color: 'var(--accent-primary)' }}>Upload &amp; Analyze</div>
+            <h2 className="section-title">From CSV to diagnostic report, no setup required.</h2>
+            <p className="section-subtitle" style={{ maxWidth: '640px', margin: '0.75rem auto 0' }}>
+              This is the platform's primary flow. No battery has to be registered ahead of time — and a real battery's telemetry rarely lives in a single file, so it accepts more than one CSV at once.
+            </p>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1.25rem' }}>
+            {[
+              { step: '1', icon: <Upload size={20} />, title: 'Add your CSV(s)', desc: 'Drag & drop one or several BMS telemetry logs, or start instantly with a bundled sample dataset.' },
+              { step: '2', icon: <Eye size={20} />, title: 'Preview & choose', desc: 'Each file is previewed for its detected signals — voltage, current, SOC, SOH, cell count — before anything uploads. Include, inspect, or drop any file.' },
+              { step: '3', icon: <Battery size={20} />, title: 'Battery created automatically', desc: 'A new device is registered and sized from the data itself, then every included file is imported into it.' },
+              { step: '4', icon: <Sparkles size={20} />, title: 'Instant analytics report', desc: 'Land straight on the automated findings — KPIs, anomalies, degradation, and thermal health — ready to export as a PDF.' },
+            ].map((s, i) => (
+              <div key={i} className="card" style={{ position: 'relative', paddingTop: '2rem' }}>
+                <div style={{
+                  position: 'absolute', top: '-14px', left: '1.25rem', width: '32px', height: '32px', borderRadius: '50%',
+                  background: 'var(--accent-primary)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontWeight: '700', fontSize: '0.85rem', fontFamily: "'Outfit', sans-serif", boxShadow: '0 2px 6px rgba(0,0,0,0.15)',
+                }}>
+                  {s.step}
+                </div>
+                <div style={{ color: 'var(--accent-primary)', marginBottom: '0.75rem' }}>{s.icon}</div>
+                <h3 style={{ fontSize: '1rem', marginBottom: '0.4rem' }}>{s.title}</h3>
+                <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', lineHeight: '1.5', margin: 0 }}>{s.desc}</p>
+              </div>
+            ))}
+          </div>
+
+          <div style={{ textAlign: 'center', marginTop: '2.5rem' }}>
+            <button className="btn-primary" onClick={onEnter} style={{ padding: '0.85rem 2rem', fontSize: '1rem' }}>
+              Try Upload &amp; Analyze <ArrowRight size={18} />
+            </button>
           </div>
         </div>
       </section>
@@ -194,7 +236,7 @@ export default function LandingPage() {
               { label: 'Thermal', action: onEnter },
             ]},
             { title: 'Product', items: [
-              { label: 'Data Upload', action: onEnter },
+              { label: 'Upload & Analyze', action: () => scrollTo('how-it-works') },
               { label: 'Reports', action: onEnter },
               { label: 'Fleet Monitoring', action: () => scrollTo('overview') },
               { label: 'API', action: onDocs },
