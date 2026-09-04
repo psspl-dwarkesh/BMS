@@ -522,6 +522,47 @@ a { text-decoration: none; color: inherit; }
 
 .btn-ghost:hover { background: var(--bg-panel); color: var(--text-primary); }
 
+/* Referenced by UserManagement.jsx's Disable/Enable action (built as
+   className={`btn-${...}`}, so a plain string search for "btn-danger"/
+   "btn-success" won't find the call site) - neither class existed anywhere
+   in this file, so that button rendered with zero styling: bare default
+   browser-button chrome instead of the app's design system. */
+.btn-danger {
+  background: var(--danger);
+  color: #ffffff;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 0.6rem 1.25rem;
+  font-weight: 600;
+  font-size: 0.875rem;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  transition: all 0.15s ease;
+}
+
+.btn-danger:hover { background: #dc2626; }
+
+.btn-success {
+  background: var(--success);
+  color: #ffffff;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 0.6rem 1.25rem;
+  font-weight: 600;
+  font-size: 0.875rem;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  transition: all 0.15s ease;
+}
+
+.btn-success:hover { background: #16a34a; }
+
 /* ═══════════════════════════════════════════
    TOGGLE SWITCH
    ═══════════════════════════════════════════ */
