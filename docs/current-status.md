@@ -57,9 +57,20 @@ The old per-device "Historical Data Ingestion" page (`/app/devices/:id/upload`, 
   measured/estimated), Thermal Analysis, 9-type anomaly detection, Automated Findings, PDF/CSV
   report export — all computed from data fetched from the backend via `useDeviceAnalytics.js`
 - [x] In-app documentation view (`Documentation.jsx`), including a diagram of the Upload & Analyze
-  flow and the deployment-architecture options
+  flow, the deployment-architecture options, and dedicated topics on the Admin/User assignment
+  model, the Data Sources panel, and the Fleet Map
 - [x] RBAC: **admin** (full fleet access) and **user** (assigned devices only) — enforced both by
   route guards (`RequireAuth adminOnly`) and backend `require_admin`/`get_scoped_device` checks
+- [x] **Data Sources panel** (`UploadHistoryPanel.jsx`, topbar database icon once a device is
+  selected): the CSV-upload audit trail a device never had — every import batch's filename,
+  upload timestamp, row count, an include/exclude toggle (hides that batch's rows from every
+  analytics endpoint without deleting them), a view-sample-rows action, and a permanent delete.
+  Backed by the new `TelemetryImport` model and `/telemetry/imports*` endpoints
+  (`backend/routers/telemetry.py`)
+- [x] **Fleet Map** (`/app/fleet/map`, admin-only): every registered battery plotted on one
+  Leaflet + OpenStreetMap map, pin-colored by device status, using its latest GPS fix or its
+  `home_latitude`/`home_longitude` as a fallback; devices with neither are listed separately
+  instead of being plotted at (0,0)
 
 ### Frontend — known limitations (worth knowing before you build on it)
 - Device-scoped analytics tabs (Degradation/Thermal/Data Quality/Findings) are computed over the
@@ -74,6 +85,10 @@ The old per-device "Historical Data Ingestion" page (`/app/devices/:id/upload`, 
   — refine the search to see more.
 - `predictApi.getRul` (backend `/predict/rul`, a trained RandomForestRegressor for SOH/RUL) and the
   historical per-cell drill-down endpoint exist and work, but aren't called from any UI yet.
+- A CSV's `Cycle_Number`/`Capacity_Ah` columns are now stored per telemetry row (see Backend
+  below), but the Degradation tab's measured-vs-EKF-estimated branching hasn't been updated to
+  prefer them yet — it still estimates from SOH/voltage trends even when real capacity data is
+  present. Wiring that in is a follow-up.
 
 ### Backend — real, persistent, wired to the frontend
 - [x] FastAPI server, SQLite (`bms_analytics.db`) via SQLAlchemy; auto-creates tables and
@@ -86,7 +101,13 @@ The old per-device "Historical Data Ingestion" page (`/app/devices/:id/upload`, 
 - [x] `GET /api/v1/devices/{id}/telemetry/latest|history|history/export`,
   `POST /api/v1/devices/{id}/telemetry/import` — CSV import runs as a background task with batched
   inserts (200 rows/commit), capped at 1000 rows/import for this demo (the response reports how
-  many rows were actually accepted if the file was larger)
+  many rows were actually accepted if the file was larger). Also now reads Latitude/Longitude and
+  Cycle_Number/Capacity_Ah columns when present (previously silently dropped despite being
+  documented/advertised in the UI)
+- [x] `GET/PATCH/DELETE /api/v1/devices/{id}/telemetry/imports[/{import_id}]`,
+  `GET .../imports/{import_id}/preview` — the CSV upload audit trail backing the Data Sources
+  panel (`TelemetryImport` model). Every `latest`/`history`/`location/history`/fleet-list query
+  excludes a device's excluded import batches so the include/exclude toggle propagates everywhere
 - [x] `GET /api/v1/devices/{id}/location/history` — GPS trace, capped at the most recent 2000 points
 - [x] `GET/POST /api/v1/alerts`, `.../acknowledge` — capped at 500 most-recent rows
 - [x] `POST /api/v1/devices/{id}/predict/rul` — SOH/RUL prediction via a RandomForestRegressor

@@ -1,10 +1,11 @@
 import { useState, useRef, useEffect } from 'react';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Globe, Users, Battery, Activity, AlertTriangle, Thermometer, Upload, FileText, Search, Bell, Settings, X, LogOut, Menu, Shield, Zap, CheckCircle2 } from 'lucide-react';
+import { Globe, Users, Battery, Activity, AlertTriangle, Thermometer, Upload, FileText, Search, Bell, Settings, X, LogOut, Menu, Shield, Zap, CheckCircle2, Database, Map as MapIcon } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { alertsApi, devicesApi } from '../api/endpoints';
 import Select from './common/Select';
+import UploadHistoryPanel, { useDeviceImports } from './UploadHistoryPanel';
 
 const WS_RECONNECT_BASE_MS = 1000;
 const WS_RECONNECT_MAX_MS = 30000;
@@ -104,11 +105,19 @@ export default function Layout() {
   const [showProfile, setShowProfile] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [selectedDeviceId, setSelectedDeviceId] = useState('');
+  const [showUploadHistory, setShowUploadHistory] = useState(false);
 
   const profileRef = useRef(null);
   const notifRef = useRef(null);
 
   const { liveAlerts, unreadAlerts, setUnreadAlerts } = useLiveSocket();
+
+  // Shared with UploadHistoryPanel's own query - lets the topbar button show
+  // "how many CSVs are currently feeding this device's dashboard" at a
+  // glance, without opening the panel, and without a second network call
+  // (same react-query cache key).
+  const { data: deviceImports = [] } = useDeviceImports(selectedDeviceId);
+  const excludedImportCount = deviceImports.filter((i) => !i.included).length;
 
   // Shared react-query cache for the sidebar's device list - was previously
   // a raw devicesApi.getDevices() call re-run on every route/tab navigation
@@ -193,6 +202,9 @@ export default function Layout() {
               <div className="sidebar-section-label">Fleet Management</div>
               <NavLink to="/app/fleet" end className={({isActive}) => `sidebar-nav-item ${isActive ? 'active' : ''}`} onClick={() => setSidebarOpen(false)}>
                 <Globe size={18} /> Fleet Overview
+              </NavLink>
+              <NavLink to="/app/fleet/map" className={({isActive}) => `sidebar-nav-item ${isActive ? 'active' : ''}`} onClick={() => setSidebarOpen(false)}>
+                <MapIcon size={18} /> Fleet Map
               </NavLink>
               <NavLink to="/app/fleet/alerts" className={({isActive}) => `sidebar-nav-item ${isActive ? 'active' : ''}`} onClick={() => setSidebarOpen(false)}>
                 <AlertTriangle size={18} /> Fleet Alerts
@@ -295,6 +307,26 @@ export default function Layout() {
             {/* Route title handled inside individual components or via breadcrumbs if needed */}
           </div>
           <div className="topbar-right">
+            {/* Data Sources - CSV upload history for the selected device */}
+            {selectedDeviceId && (
+              <button
+                className="topbar-icon-btn"
+                onClick={() => setShowUploadHistory(true)}
+                title="Data Sources — CSV upload history for this battery"
+                style={{ position: 'relative' }}
+              >
+                <Database size={16} />
+                {deviceImports.length > 0 && (
+                  <span style={{
+                    position: 'absolute', top: '-6px', right: '-6px', minWidth: '16px', height: '16px', padding: '0 3px',
+                    borderRadius: '8px', background: excludedImportCount > 0 ? 'var(--warning)' : 'var(--accent-primary)',
+                    color: '#fff', fontSize: '0.6rem', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  }}>
+                    {deviceImports.length}
+                  </span>
+                )}
+              </button>
+            )}
             {/* Notifications */}
             <div style={{ position: 'relative' }}>
               <button 
@@ -341,6 +373,14 @@ export default function Layout() {
           <Outlet />
         </main>
       </div>
+
+      {selectedDeviceId && (
+        <UploadHistoryPanel
+          deviceId={selectedDeviceId}
+          open={showUploadHistory}
+          onClose={() => setShowUploadHistory(false)}
+        />
+      )}
     </div>
   );
 }

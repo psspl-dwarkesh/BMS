@@ -83,7 +83,26 @@ export const telemetryApi = {
       headers: { 'Content-Type': 'multipart/form-data' },
     });
     return data;
-  }
+  },
+  // Upload History ("Data Sources" panel) - the audit trail of CSV batches
+  // imported into a device (see backend/routers/telemetry.py TelemetryImport
+  // endpoints).
+  getImports: async (deviceId) => {
+    const { data } = await apiClient.get(`/api/v1/devices/${deviceId}/telemetry/imports`);
+    return data;
+  },
+  toggleImport: async (deviceId, importId, included) => {
+    const { data } = await apiClient.patch(`/api/v1/devices/${deviceId}/telemetry/imports/${importId}`, { included });
+    return data;
+  },
+  deleteImport: async (deviceId, importId) => {
+    const { data } = await apiClient.delete(`/api/v1/devices/${deviceId}/telemetry/imports/${importId}`);
+    return data;
+  },
+  previewImport: async (deviceId, importId) => {
+    const { data } = await apiClient.get(`/api/v1/devices/${deviceId}/telemetry/imports/${importId}/preview`);
+    return data;
+  },
 };
 
 export const locationApi = {

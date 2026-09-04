@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Globe, ShieldAlert, Battery, Search, Server, Filter, CheckCircle2, AlertTriangle, Cpu, Upload } from 'lucide-react';
+import { Globe, ShieldAlert, Battery, Search, Server, Filter, CheckCircle2, AlertTriangle, Cpu, Upload, Map as MapIcon } from 'lucide-react';
 import { devicesApi } from '../api/endpoints';
 import { LoadingState, ErrorState } from './common/StateViews';
 
@@ -24,11 +24,16 @@ export default function FleetDashboard() {
   }, [fleetData, searchTerm, statusFilter]);
 
   const stats = useMemo(() => {
+    // Device.status is one of active/inactive/maintenance/fault (see
+    // backend/models.py DeviceStatus) - this used to compare against
+    // 'healthy'/'warning'/'critical', values the real API never returns, so
+    // these three counters (and the status badge below) were silently
+    // always zero/green regardless of actual fleet health.
     return {
       total: fleetData.length,
-      healthy: fleetData.filter(p => p.status === 'healthy').length,
-      warning: fleetData.filter(p => p.status === 'warning').length,
-      critical: fleetData.filter(p => p.status === 'critical').length,
+      healthy: fleetData.filter(p => p.status === 'active').length,
+      warning: fleetData.filter(p => p.status === 'maintenance').length,
+      critical: fleetData.filter(p => p.status === 'fault').length,
     };
   }, [fleetData]);
 
@@ -71,6 +76,9 @@ export default function FleetDashboard() {
                   <div style={{ fontWeight: '600', fontSize: '0.9rem' }}>Live Connection</div>
                 </div>
               </div>
+              <button className="btn-secondary" onClick={() => navigate('/app/fleet/map')} style={{ padding: '0.75rem 1.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <MapIcon size={16} /> Fleet Map
+              </button>
               <button className="btn-primary" onClick={() => navigate('/app/upload')} style={{ padding: '0.75rem 1.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                 <Upload size={16} /> Upload &amp; Analyze
               </button>
@@ -115,8 +123,8 @@ export default function FleetDashboard() {
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
           <Filter size={16} color="var(--text-muted)" />
           <div style={{ display: 'flex', gap: '0.5rem', background: 'var(--bg-secondary)', padding: '0.25rem', borderRadius: 'var(--radius-md)' }}>
-            {['All', 'Healthy', 'Warning', 'Critical'].map(status => (
-              <button 
+            {['All', 'Active', 'Maintenance', 'Fault', 'Inactive'].map(status => (
+              <button
                 key={status}
                 onClick={() => setStatusFilter(status.toLowerCase())}
                 style={{
@@ -160,7 +168,7 @@ export default function FleetDashboard() {
                   </td>
                   <td style={{ padding: '1rem', color: 'var(--text-secondary)' }}>{pack.pack_name}</td>
                   <td style={{ padding: '1rem' }}>
-                    <span className={`badge badge-${pack.status === 'critical' ? 'danger' : pack.status === 'warning' ? 'warning' : 'success'}`}>
+                    <span className={`badge badge-${pack.status === 'fault' ? 'danger' : pack.status === 'maintenance' ? 'warning' : pack.status === 'inactive' ? 'neutral' : 'success'}`}>
                       {pack.status || 'unknown'}
                     </span>
                   </td>

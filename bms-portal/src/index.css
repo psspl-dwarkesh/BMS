@@ -716,24 +716,40 @@ a { text-decoration: none; color: inherit; }
 
 .landing-hero {
   position: relative;
-  padding: 8rem 5% 10rem 5%;
+  padding: 7rem 5% 6rem 5%;
   display: flex;
   flex-direction: column;
   align-items: center;
   text-align: center;
   overflow: hidden;
-  background: linear-gradient(180deg, #ffffff 0%, #f8f9fa 100%);
+  /* Deep navy/tech gradient - matches LoginPage.jsx's left panel treatment
+     (same rgba(8,17,34)/cyan/emerald palette) so the two entry points to
+     the product read as one brand instead of a pale marketing page handing
+     off to a completely different-looking login screen. */
+  background: linear-gradient(160deg, #08111f 0%, #0d2338 50%, #08111f 100%);
 }
 
 .landing-hero::before {
   content: '';
   position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: radial-gradient(ellipse 60% 50% at 50% 0%, rgba(0,0,0,0.03) 0%, transparent 70%);
+  inset: 0;
   pointer-events: none;
+  background-image:
+    radial-gradient(ellipse 60% 55% at 50% 0%, rgba(8,145,178,0.28) 0%, transparent 70%),
+    linear-gradient(rgba(255,255,255,0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.045) 1px, transparent 1px);
+  background-size: auto, 44px 44px, 44px 44px;
+  animation: heroGridDrift 18s linear infinite;
+}
+
+.landing-hero::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 15% 100%, rgba(16,185,129,0.22) 0%, transparent 55%),
+    radial-gradient(circle at 90% 15%, rgba(8,145,178,0.2) 0%, transparent 50%);
 }
 
 .hero-content {
@@ -746,15 +762,16 @@ a { text-decoration: none; color: inherit; }
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
-  background: var(--bg-panel);
-  color: var(--text-secondary);
+  background: rgba(255,255,255,0.08);
+  color: #67e8f9;
   font-size: 0.8rem;
   font-weight: 600;
   padding: 0.4rem 1rem;
   border-radius: 99px;
-  border: 1px solid var(--border-default);
+  border: 1px solid rgba(255,255,255,0.14);
   margin-bottom: 2rem;
   letter-spacing: 0.03em;
+  backdrop-filter: blur(6px);
 }
 
 .hero-title {
@@ -762,12 +779,19 @@ a { text-decoration: none; color: inherit; }
   line-height: 1.1;
   font-weight: 700;
   margin-bottom: 1.5rem;
-  color: var(--text-primary);
+  color: #fff;
+}
+
+.hero-title .hero-title-accent {
+  background: linear-gradient(90deg, #22d3ee, #34d399);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }
 
 .hero-subtitle {
   font-size: 1.15rem;
-  color: var(--text-secondary);
+  color: rgba(255,255,255,0.68);
   line-height: 1.7;
   max-width: 600px;
   margin: 0 auto 2.5rem auto;
@@ -777,6 +801,54 @@ a { text-decoration: none; color: inherit; }
   display: flex;
   gap: 1rem;
   justify-content: center;
+}
+
+/* Animated battery-pack visual - CSS-only (no chart lib), staggered per-bar
+   pulse plus a moving current-trace line, echoing "live telemetry" rather
+   than a static illustration. */
+.hero-battery-visual {
+  position: relative;
+  z-index: 1;
+  margin-top: 3.5rem;
+}
+
+.hero-cell-bar {
+  transform-origin: bottom;
+  animation: heroCellPulse 2.6s ease-in-out infinite;
+}
+
+.hero-trace-path {
+  stroke-dasharray: 6 5;
+  animation: heroTraceFlow 1.4s linear infinite;
+}
+
+.hero-status-dot {
+  animation: heroDotPulse 2s ease-in-out infinite;
+}
+
+@keyframes heroGridDrift {
+  from { background-position: 0 0, 0 0, 0 0; }
+  to   { background-position: 0 0, 44px 44px, 44px 44px; }
+}
+
+@keyframes heroCellPulse {
+  0%, 100% { transform: scaleY(1); opacity: 1; }
+  50%      { transform: scaleY(0.62); opacity: 0.78; }
+}
+
+@keyframes heroTraceFlow {
+  to { stroke-dashoffset: -22; }
+}
+
+@keyframes heroDotPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.35; transform: scale(0.8); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing-hero::before, .hero-cell-bar, .hero-trace-path, .hero-status-dot {
+    animation: none !important;
+  }
 }
 
 .landing-section {

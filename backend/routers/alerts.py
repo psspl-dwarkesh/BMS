@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from database import get_db
 from models import Alert, DeviceAssignment, User, UserRole
-from routers import get_current_user
+from routers import get_current_user, to_utc_iso
 
 router = APIRouter(prefix="/api/v1/alerts", tags=["alerts"])
 
@@ -23,9 +23,9 @@ def _alert_to_dict(a: Alert) -> dict:
         "message"        : a.message,
         "value"          : a.value,
         "threshold"      : a.threshold,
-        "triggered_at"   : a.triggered_at.isoformat(),
-        "resolved_at"    : a.resolved_at.isoformat() if a.resolved_at else None,
-        "acknowledged_at": a.acknowledged_at.isoformat() if a.acknowledged_at else None,
+        "triggered_at"   : to_utc_iso(a.triggered_at),
+        "resolved_at"    : to_utc_iso(a.resolved_at),
+        "acknowledged_at": to_utc_iso(a.acknowledged_at),
     }
 
 

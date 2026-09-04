@@ -40,6 +40,7 @@ from sqlalchemy.orm import Session
 from database import SessionLocal
 from models import Device, ConnectionType, TelemetrySource
 from ingestion import ingest_telemetry_row
+from routers import to_utc_iso
 from ws_manager import manager
 
 log = logging.getLogger(__name__)
@@ -250,7 +251,7 @@ async def _simulate_device(device_id: int, cell_count: int, thermistor_count: in
             continue
 
         # ── Broadcast over WebSocket ──────────────────────────────────────
-        snapshot = {**fields, "id": trow.id, "sample_time": trow.sample_time.isoformat()}
+        snapshot = {**fields, "id": trow.id, "sample_time": to_utc_iso(trow.sample_time)}
 
         await manager.broadcast_to_scoped(
             {"type": "TELEMETRY_UPDATE", "device_id": device_id, "snapshot": snapshot},
@@ -267,7 +268,7 @@ async def _simulate_device(device_id: int, cell_count: int, thermistor_count: in
                     "severity"  : alert.severity.value,
                     "message"   : alert.message,
                     "value"     : alert.value,
-                    "triggered_at": alert.triggered_at.isoformat(),
+                    "triggered_at": to_utc_iso(alert.triggered_at),
                 },
                 device_id=device_id,
             )
@@ -279,7 +280,7 @@ async def _simulate_device(device_id: int, cell_count: int, thermistor_count: in
                     "device_id"  : device_id,
                     "alert_id"   : alert.id,
                     "alert_type" : alert.type.value,
-                    "resolved_at": alert.resolved_at.isoformat(),
+                    "resolved_at": to_utc_iso(alert.resolved_at),
                 },
                 device_id=device_id,
             )

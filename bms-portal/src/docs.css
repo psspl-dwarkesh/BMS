@@ -218,3 +218,44 @@
   margin: 0 !important;
   font-size: 0.85rem;
 }
+
+/* React-docs-style "On this page" mini nav - sits right under the H1 of
+   each topic and jump-scrolls to that topic's own h2 sections. */
+.doc-on-this-page {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  padding: 1rem 1.25rem;
+  margin-bottom: 2rem;
+  display: inline-block;
+  min-width: 220px;
+}
+
+.doc-on-this-page-title {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 700;
+  color: var(--text-muted);
+  margin-bottom: 0.5rem;
+}
+
+.doc-on-this-page ul {
+  list-style: none;
+  margin: 0 !important;
+  padding: 0 !important;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.doc-on-this-page a {
+  color: var(--accent-primary);
+  font-size: 0.85rem;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.doc-on-this-page a:hover {
+  text-decoration: underline;
+}

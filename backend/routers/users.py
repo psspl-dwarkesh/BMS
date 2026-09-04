@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from models import Device, DeviceAssignment, User, UserRole
-from routers import get_current_user, hash_password, require_admin
+from routers import get_current_user, hash_password, require_admin, to_utc_iso
 
 router = APIRouter(prefix="/api/v1/users", tags=["users"])
 
@@ -38,8 +38,8 @@ def _user_to_dict(user: User, device_ids: list[int]) -> dict:
         "full_name"    : user.full_name,
         "role"         : user.role.value,
         "is_active"    : user.is_active,
-        "created_at"   : user.created_at.isoformat(),
-        "last_login_at": user.last_login_at.isoformat() if user.last_login_at else None,
+        "created_at"   : to_utc_iso(user.created_at),
+        "last_login_at": to_utc_iso(user.last_login_at),
         "device_ids"   : device_ids,
     }
 

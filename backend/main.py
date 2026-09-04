@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 
 from config import settings
-from database import engine, Base
+from database import engine, Base, ensure_schema_migrations
 from ws_manager import manager
 from simulator import start_simulator, stop_simulator
 
@@ -34,7 +34,10 @@ log = logging.getLogger("bms.main")
 async def lifespan(app: FastAPI):
     # Ensure tables exist (we rely on seed.py for initial data, but create_all is safe)
     Base.metadata.create_all(bind=engine)
-    
+    # Then patch in any columns added to an already-existing table (see
+    # ensure_schema_migrations' docstring - create_all() alone can't do this).
+    ensure_schema_migrations(engine)
+
     # Auto-seed the database if it's completely empty (e.g. fresh Render deploy)
     from database import SessionLocal
     from models import User

@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 from models import User, UserRole
 from routers import (
-    create_access_token, get_current_user, get_user_device_ids, verify_password
+    create_access_token, get_current_user, get_user_device_ids, to_utc_iso, verify_password
 )
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
@@ -71,7 +71,7 @@ def me(current_user: User = Depends(get_current_user), db: Session = Depends(get
         "full_name"    : current_user.full_name,
         "role"         : current_user.role.value,
         "is_active"    : current_user.is_active,
-        "created_at"   : current_user.created_at.isoformat(),
-        "last_login_at": current_user.last_login_at.isoformat() if current_user.last_login_at else None,
+        "created_at"   : to_utc_iso(current_user.created_at),
+        "last_login_at": to_utc_iso(current_user.last_login_at),
         "device_ids"   : device_ids,
     }

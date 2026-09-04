@@ -3,12 +3,12 @@ import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from database import get_db
-from models import Chemistry, ConnectionType, Device, DeviceStatus, Telemetry, User, UserRole
-from routers import get_current_user, get_scoped_device, require_admin
+from models import Chemistry, ConnectionType, Device, DeviceStatus, Telemetry, TelemetryImport, User, UserRole
+from routers import get_current_user, get_scoped_device, require_admin, to_utc_iso
 
 router = APIRouter(prefix="/api/v1/devices", tags=["devices"])
 
@@ -53,9 +53,21 @@ def _latest_telemetry_by_device(db: Session, device_ids: list[int]) -> dict[int,
     """
     if not device_ids:
         return {}
+    # Same "exclude hidden CSV batches" rule as _visible_telemetry_query in
+    # telemetry.py - without it, the fleet-wide list (and the Fleet Map)
+    # could show a device's status/position from data the user just toggled
+    # off in its Upload History panel, while the device's own tabs (which do
+    # filter) show something else entirely. Only the max(sample_time)
+    # lookup needs the filter - the final join below matches on the
+    # resulting (device_id, sample_time) pair, which is already guaranteed
+    # to belong to a visible row.
     latest_per_device = (
         db.query(Telemetry.device_id, func.max(Telemetry.sample_time).label("max_time"))
-        .filter(Telemetry.device_id.in_(device_ids))
+        .outerjoin(TelemetryImport, Telemetry.import_id == TelemetryImport.id)
+        .filter(
+            Telemetry.device_id.in_(device_ids),
+            or_(Telemetry.import_id.is_(None), TelemetryImport.included == True),
+        )
         .group_by(Telemetry.device_id)
         .subquery()
     )
@@ -100,19 +112,27 @@ def _device_snapshot(device: Device, db: Session, latest: Telemetry | None = "un
         "connection_type"  : device.connection_type.value if device.connection_type else None,
         "install_site"     : device.install_site,
         "status"           : device.status.value if device.status else None,
-        "last_seen_at"     : device.last_seen_at.isoformat() if device.last_seen_at else None,
-        "created_at"       : device.created_at.isoformat(),
+        "last_seen_at"     : to_utc_iso(device.last_seen_at),
+        "created_at"       : to_utc_iso(device.created_at),
+        # Never exposed before - the create/patch schemas accept these and
+        # the simulator's random-walk reads them, but no response ever sent
+        # them back, so nothing (Device Registry's table, the Fleet Map)
+        # could display or reuse a device's home coordinate.
+        "home_latitude"    : device.home_latitude,
+        "home_longitude"   : device.home_longitude,
         "latest_telemetry" : None,
     }
     if latest:
         d["latest_telemetry"] = {
             "id"          : latest.id,
-            "sample_time" : latest.sample_time.isoformat(),
+            "sample_time" : to_utc_iso(latest.sample_time),
             "pack_voltage": latest.pack_voltage,
             "pack_current": latest.pack_current,
             "soc"         : latest.soc,
             "soh"         : latest.soh,
             "avg_cell_temp": latest.avg_cell_temp,
+            "latitude"    : latest.latitude,
+            "longitude"   : latest.longitude,
             "source"      : latest.source.value if latest.source else None,
         }
     return d

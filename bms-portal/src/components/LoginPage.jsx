@@ -56,13 +56,17 @@ export default function LoginPage() {
     <div style={{ display: 'flex', height: '100vh', width: '100vw' }}>
       {/* Left panel */}
       <div style={{
-        flex: '0 0 45%', 
-        background: 'url("/login_bg.png") center/cover no-repeat',
+        flex: '0 0 45%',
+        background: 'url("/login-hero.jpg") center/cover no-repeat',
         color: '#fff', display: 'flex', flexDirection: 'column', padding: '3rem',
         position: 'relative', overflow: 'hidden'
       }}>
-        {/* Dark overlay for readability */}
-        <div style={{ position: 'absolute', inset: 0, background: 'rgba(8, 17, 34, 0.75)', zIndex: 0 }} />
+        {/* Dark overlay for readability - the new compressed hero photo is
+            busier/higher-contrast than the old one, so the flat 0.75 tint
+            alone left the headline hard to read against it; a bottom-heavy
+            gradient plus the h1's own text-shadow below picks up the slack
+            without darkening the image everywhere. */}
+        <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(8,17,34,0.72) 0%, rgba(8,17,34,0.82) 55%, rgba(8,17,34,0.88) 100%)', zIndex: 0 }} />
         
         {/* Top logo */}
         <div style={{ zIndex: 1, display: 'flex', alignItems: 'center', gap: '0.75rem', cursor: 'pointer' }} onClick={() => navigate('/')}>
@@ -81,9 +85,13 @@ export default function LoginPage() {
           </span>
         </div>
 
-        {/* Main content */}
-        <div style={{ zIndex: 1, flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', maxWidth: '420px' }}>
-          <h1 style={{ fontSize: '2.75rem', marginBottom: '1.25rem', lineHeight: '1.15', fontWeight: '700', letterSpacing: '-0.03em' }}>
+        {/* Main content - centered horizontally in the panel (was pinned to
+            the left edge: a flex item with maxWidth inside a stretch-aligned
+            column container sizes to its cap but still aligns at flex-start
+            unless told otherwise). Text itself stays left-aligned within the
+            centered block. */}
+        <div style={{ zIndex: 1, flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignSelf: 'center', maxWidth: '420px' }}>
+          <h1 style={{ fontSize: '2.75rem', marginBottom: '1.25rem', lineHeight: '1.15', fontWeight: '700', letterSpacing: '-0.03em', textShadow: '0 2px 16px rgba(0,0,0,0.45)' }}>
             Enterprise Battery Intelligence
           </h1>
           <p style={{ color: 'rgba(255,255,255,0.7)', fontSize: '1.05rem', lineHeight: '1.65', marginBottom: '2.5rem' }}>
