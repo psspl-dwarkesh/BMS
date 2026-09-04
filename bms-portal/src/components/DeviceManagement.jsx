@@ -1,6 +1,7 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Server, Plus, Save, Battery } from 'lucide-react';
+import { Server, Plus, Save, Battery, Trash2, Database } from 'lucide-react';
 import { devicesApi } from '../api/endpoints';
 import { LoadingState, ErrorState } from './common/StateViews';
 import Select from './common/Select';
@@ -30,13 +31,23 @@ const emptyDevice = {
 };
 
 export default function DeviceManagement() {
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [isCreating, setIsCreating] = useState(false);
   const [newDevice, setNewDevice] = useState(emptyDevice);
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
 
   const { data: devices = [], isLoading, isError, refetch } = useQuery({
     queryKey: ['devices'],
     queryFn: devicesApi.getDevices
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id) => devicesApi.deleteDevice(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['devices'] });
+      setConfirmDeleteId(null);
+    },
   });
 
   const createMutation = useMutation({
@@ -159,7 +170,9 @@ export default function DeviceManagement() {
                   <th style={{ padding: '1rem', textAlign: 'left', fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Configuration</th>
                   <th style={{ padding: '1rem', textAlign: 'left', fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Rating</th>
                   <th style={{ padding: '1rem', textAlign: 'left', fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Connection</th>
+                  <th style={{ padding: '1rem', textAlign: 'left', fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Data Sources</th>
                   <th style={{ padding: '1rem', textAlign: 'left', fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Registered</th>
+                  <th style={{ padding: '1rem', textAlign: 'center', fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Action</th>
                 </tr>
               </thead>
               <tbody>
@@ -179,8 +192,51 @@ export default function DeviceManagement() {
                     <td style={{ padding: '1rem' }}>
                       <span className="badge badge-neutral">{device.connection_type}</span>
                     </td>
+                    <td style={{ padding: '1rem' }}>
+                      <button
+                        type="button"
+                        onClick={() => navigate(`/app/devices/${device.id}/realtime`)}
+                        title="Open this battery to view/manage its imported CSVs"
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem', background: 'transparent', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)', padding: '0.3rem 0.6rem', fontSize: '0.78rem', color: 'var(--text-secondary)', cursor: 'pointer' }}
+                      >
+                        <Database size={12} /> {device.csv_import_count ?? 0}
+                      </button>
+                    </td>
                     <td style={{ padding: '1rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
                       {new Date(device.created_at).toLocaleDateString()}
+                    </td>
+                    <td style={{ padding: '1rem', textAlign: 'center' }}>
+                      {confirmDeleteId === device.id ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem', alignItems: 'center' }}>
+                          <span style={{ fontSize: '0.7rem', color: 'var(--danger)' }}>Delete permanently?</span>
+                          <div style={{ display: 'flex', gap: '0.35rem' }}>
+                            <button
+                              type="button"
+                              onClick={() => deleteMutation.mutate(device.id)}
+                              disabled={deleteMutation.isPending}
+                              style={{ padding: '0.3rem 0.6rem', fontSize: '0.72rem', background: 'var(--danger)', color: '#fff', border: 'none', borderRadius: 'var(--radius-sm)', cursor: 'pointer' }}
+                            >
+                              {deleteMutation.isPending && deleteMutation.variables === device.id ? 'Deleting…' : 'Yes, delete'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setConfirmDeleteId(null)}
+                              style={{ padding: '0.3rem 0.6rem', fontSize: '0.72rem', background: 'transparent', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)', cursor: 'pointer', color: 'var(--text-secondary)' }}
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          title="Delete this battery permanently — removes all its telemetry, CSV imports, and alerts"
+                          onClick={() => setConfirmDeleteId(device.id)}
+                          style={{ background: 'transparent', border: 'none', color: 'var(--danger)', cursor: 'pointer', padding: '0.35rem' }}
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}

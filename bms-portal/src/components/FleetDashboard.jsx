@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Globe, ShieldAlert, Battery, Search, Server, Filter, CheckCircle2, AlertTriangle, Cpu, Upload, Map as MapIcon } from 'lucide-react';
+import { Globe, ShieldAlert, Battery, Search, Server, Filter, CheckCircle2, AlertTriangle, Cpu, Upload, Map as MapIcon, Database } from 'lucide-react';
 import { devicesApi } from '../api/endpoints';
 import { LoadingState, ErrorState } from './common/StateViews';
 
@@ -157,6 +157,7 @@ export default function FleetDashboard() {
                 <th style={{ padding: '1rem', textAlign: 'left', fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Status</th>
                 <th style={{ padding: '1rem', textAlign: 'left', fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Chemistry</th>
                 <th style={{ padding: '1rem', textAlign: 'left', fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Configuration</th>
+                <th style={{ padding: '1rem', textAlign: 'left', fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Data Sources</th>
                 <th style={{ padding: '1rem', textAlign: 'center', fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Action</th>
               </tr>
             </thead>
@@ -168,9 +169,22 @@ export default function FleetDashboard() {
                   </td>
                   <td style={{ padding: '1rem', color: 'var(--text-secondary)' }}>{pack.pack_name}</td>
                   <td style={{ padding: '1rem' }}>
-                    <span className={`badge badge-${pack.status === 'fault' ? 'danger' : pack.status === 'maintenance' ? 'warning' : pack.status === 'inactive' ? 'neutral' : 'success'}`}>
-                      {pack.status || 'unknown'}
-                    </span>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem', alignItems: 'flex-start' }}>
+                      <span className={`badge badge-${pack.status === 'fault' ? 'danger' : pack.status === 'maintenance' ? 'warning' : pack.status === 'inactive' ? 'neutral' : 'success'}`}>
+                        {pack.status || 'unknown'}
+                      </span>
+                      {/* Device.status is a separate lifecycle field an admin
+                          sets (active/maintenance/fault/inactive) - it isn't
+                          derived from telemetry, so a registered battery can
+                          be "active" in the fleet roster while having no
+                          currently-visible data (nothing imported yet, or
+                          everything toggled off in its Data Sources panel).
+                          Flag that distinction explicitly instead of letting
+                          the status badge alone imply it's reporting data. */}
+                      {!pack.latest_telemetry && (
+                        <span className="badge badge-neutral" style={{ fontSize: '0.65rem' }}>No live data</span>
+                      )}
+                    </div>
                   </td>
                   <td style={{ padding: '1rem', color: 'var(--text-secondary)' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
@@ -180,8 +194,18 @@ export default function FleetDashboard() {
                   <td style={{ padding: '1rem', color: 'var(--text-secondary)' }}>
                     {pack.cell_count}S · {pack.connection_type}
                   </td>
+                  <td style={{ padding: '1rem' }}>
+                    <button
+                      type="button"
+                      onClick={() => navigate(`/app/devices/${pack.id}/realtime`)}
+                      title="Open this battery to view/manage its imported CSVs"
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem', background: 'transparent', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)', padding: '0.3rem 0.6rem', fontSize: '0.78rem', color: 'var(--text-secondary)', cursor: 'pointer' }}
+                    >
+                      <Database size={12} /> {pack.csv_import_count ?? 0} CSV{pack.csv_import_count === 1 ? '' : 's'}
+                    </button>
+                  </td>
                   <td style={{ padding: '1rem', textAlign: 'center' }}>
-                    <button 
+                    <button
                       onClick={() => navigate(`/app/devices/${pack.id}/realtime`)}
                       style={{ background: 'transparent', border: '1px solid var(--accent-primary)', color: 'var(--accent-primary)', padding: '0.3rem 0.75rem', borderRadius: 'var(--radius-sm)', fontSize: '0.75rem', fontWeight: '600', cursor: 'pointer' }}
                     >
@@ -191,7 +215,7 @@ export default function FleetDashboard() {
                 </tr>
               )) : (
                 <tr>
-                  <td colSpan="6" style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+                  <td colSpan="7" style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-muted)' }}>
                     No battery packs match your search criteria.
                   </td>
                 </tr>

@@ -58,6 +58,10 @@ export const devicesApi = {
     const { data } = await apiClient.patch(`/api/v1/devices/${id}`, updates);
     return data;
   },
+  deleteDevice: async (id) => {
+    const { data } = await apiClient.delete(`/api/v1/devices/${id}`);
+    return data;
+  },
 };
 
 export const telemetryApi = {
