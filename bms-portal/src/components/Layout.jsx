@@ -215,7 +215,15 @@ export default function Layout() {
               <NavLink to="/app/fleet/devices" className={({isActive}) => `sidebar-nav-item ${isActive ? 'active' : ''}`} onClick={() => setSidebarOpen(false)}>
                 <Shield size={18} /> Device Registry
               </NavLink>
-              <NavLink to="/app/upload" className={({isActive}) => `sidebar-nav-item ${isActive ? 'active' : ''}`} onClick={() => setSidebarOpen(false)}>
+              <NavLink
+                to={selectedDeviceId ? `/app/upload?device=${selectedDeviceId}` : '/app/upload'}
+                className={({isActive}) => `sidebar-nav-item ${isActive ? 'active' : ''}`}
+                onClick={() => setSidebarOpen(false)}
+                // Carries the currently-selected battery through as a query
+                // param so DataIngestion.jsx can default to "append to this
+                // battery" instead of always creating a new one - see its
+                // own comment for why append is the primary option there.
+              >
                 <Upload size={18} /> Upload &amp; Analyze
               </NavLink>
             </>

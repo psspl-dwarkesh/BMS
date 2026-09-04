@@ -92,9 +92,18 @@ def _device_snapshot(device: Device, db: Session, latest: Telemetry | None = "un
     sentinel, it's looked up here for the single-device case.
     """
     if latest == "unset":
+        # Same "exclude hidden CSV batches" rule as _latest_telemetry_by_device
+        # above (used by list_devices) - this single-device path is the one
+        # get_device()/create_device()/patch_device() hit, and was missing
+        # the filter entirely, so a device's own detail fetch could still
+        # show a batch the user had just toggled off in its Data Sources panel.
         latest = (
             db.query(Telemetry)
-            .filter(Telemetry.device_id == device.id)
+            .outerjoin(TelemetryImport, Telemetry.import_id == TelemetryImport.id)
+            .filter(
+                Telemetry.device_id == device.id,
+                or_(Telemetry.import_id.is_(None), TelemetryImport.included == True),
+            )
             .order_by(Telemetry.sample_time.desc())
             .first()
         )
