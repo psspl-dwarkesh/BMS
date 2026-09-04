@@ -12,6 +12,7 @@ const SAMPLE_DATASETS = [
   { file: '/sample_ev_pack_healthy.csv', label: 'EV Pack — Healthy', desc: '16-cell pack, balanced cells, normal thermal behavior', packName: 'Sample EV Pack (Healthy)' },
   { file: '/sample_ev_pack_anomaly.csv', label: 'EV Pack — Cell Imbalance', desc: '16-cell pack with one weak cell and a thermal event', packName: 'Sample EV Pack (Anomaly)' },
   { file: '/sample_lab_cycling_degradation.csv', label: 'Lab Cycling — Degradation', desc: '60-cycle capacity fade / SOH trend dataset', packName: 'Sample Lab Cycling Pack' },
+  { file: '/sample_full_demo_pack.csv', label: 'Comprehensive Demo — All Analytics', desc: '450 rows: cell imbalance, thermal event, degradation trend & GPS route in one file', packName: 'Comprehensive Demo Pack' },
 ];
 
 // Lightweight client-side signal detection for the pre-upload preview -

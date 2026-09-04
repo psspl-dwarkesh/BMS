@@ -20,6 +20,27 @@ log = logging.getLogger(__name__)
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
+# ── Timestamp serialization ──────────────────────────────────────────────────
+
+def to_utc_iso(dt: datetime.datetime | None) -> str | None:
+    """
+    Serialize a naive datetime (every timestamp in this codebase is created
+    via datetime.utcnow()/_now(), i.e. implicitly UTC but with no tzinfo) as
+    an explicit UTC ISO string for API responses.
+
+    `datetime.isoformat()` alone on a naive value omits the timezone, and
+    JavaScript's `new Date(...)` then parses that string as *local* time
+    instead of UTC - every relative/absolute timestamp shown in the portal
+    (Upload History's "Xh ago", alert times, GPS trail times, "last seen")
+    was silently off by the viewer's UTC offset. Marking it explicitly with
+    a 'Z' suffix fixes the parse everywhere `new Date()` is used, with no
+    change to what's actually stored in the database.
+    """
+    if dt is None:
+        return None
+    return dt.isoformat() + "Z"
+
+
 # ── Password helpers ──────────────────────────────────────────────────────────
 
 def hash_password(plain: str) -> str:

@@ -6,7 +6,8 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from models import Telemetry, User
-from routers import get_current_user, get_scoped_device
+from routers import get_current_user, get_scoped_device, to_utc_iso
+from routers.telemetry import _visible_telemetry_query
 
 router = APIRouter(prefix="/api/v1/devices/{device_id}/location", tags=["location"])
 
@@ -26,9 +27,8 @@ def get_location_history(
     device = get_scoped_device(device_id, current_user, db)
 
     q = (
-        db.query(Telemetry)
+        _visible_telemetry_query(db, device.id)
         .filter(
-            Telemetry.device_id == device.id,
             Telemetry.latitude.isnot(None),
             Telemetry.longitude.isnot(None),
         )
@@ -47,7 +47,7 @@ def get_location_history(
 
     return [
         {
-            "sample_time": r.sample_time.isoformat(),
+            "sample_time": to_utc_iso(r.sample_time),
             "latitude": r.latitude,
             "longitude": r.longitude,
         }

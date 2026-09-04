@@ -149,8 +149,125 @@ def gen_lab_cycling(filename, n_cycles=60):
     write_csv(os.path.join(OUT_DIR, filename), fieldnames, rows)
 
 
+def gen_full_demo_pack(filename):
+    """
+    ~450 rows, 2-min cadence, ~15h across three drive+charge cycles - one CSV
+    designed to give every dashboard tab something real to show, rather than
+    each sample dataset only exercising one or two:
+      - Findings/Anomalies: a cell-imbalance stretch (cell 5) and a thermal
+        spike (cell 12), each with a clear start/recovery, not just a flat line.
+      - Alerts: the imbalance is still (mildly) present on the very last row,
+        so the real backend threshold check (which only evaluates a CSV
+        import's *latest* row - see check_telemetry_thresholds) opens a
+        genuine warning-severity Alert, not just a client-side chart note.
+      - Degradation: SOH drifts down (~97% -> ~94%) across the three cycles,
+        with Cycle_Number/Capacity_Ah present so it reads as measured data.
+      - Location: Latitude/Longitude trace a short loop during each drive
+        phase (idle/charge phases carry no fix, same as most real GPS units).
+    """
+    rng = random.Random(99)
+    t0 = datetime.datetime(2026, 5, 1, 6, 0, 0)
+    rows = []
+    soc = 95.0
+    soh = 97.0
+    base_lat, base_lng = 28.6139, 77.2090  # New Delhi - arbitrary depot location
+    imbalanced_cell = 5
+    hot_cell = 12
+    fieldnames = (
+        ["Timestamp", "Cycle_Number", "Pack_Voltage", "Pack_Current", "SOC", "SOH", "Capacity_Ah", "Latitude", "Longitude"]
+        + [f"Cell{i}_Voltage" for i in range(1, CELL_COUNT + 1)]
+        + [f"Cell{i}_Temp" for i in range(1, CELL_COUNT + 1)]
+    )
+
+    n_rows = 450
+    cadence_min = 2
+    rows_per_cycle = n_rows // 3          # 150 rows/cycle: ~100 discharge, ~50 charge
+    rated_capacity_ah = 60.0
+
+    for idx in range(n_rows):
+        ts = t0 + datetime.timedelta(minutes=cadence_min * idx)
+        cycle = idx // rows_per_cycle + 1                 # 1, 2, 3
+        pos_in_cycle = idx % rows_per_cycle
+        discharging = pos_in_cycle < int(rows_per_cycle * 0.65)
+
+        # Gentle multi-cycle degradation: SOH/capacity step down a little at
+        # the start of each new cycle, drifting from ~97% to ~94% overall.
+        soh = max(90.0, 97.0 - 1.0 * (cycle - 1) - 0.01 * pos_in_cycle + rng.uniform(-0.05, 0.05))
+        capacity = rated_capacity_ah * (soh / 100)
+
+        if discharging:
+            current = -(35 + 20 * abs(math.sin(pos_in_cycle / 10)) + rng.uniform(-3, 3))
+            # Cycle 1 only: a deliberate low-SOC dip that recovers on charge,
+            # so the SOC trend chart shows a real event with a real recovery
+            # instead of a flat descent.
+            floor = 11.0 if cycle == 1 else 17.0
+            soc = max(floor, soc - 0.55 - rng.uniform(0, 0.15))
+        else:
+            current = 24 * (1 - (soc / 100) * 0.4) + rng.uniform(-1.5, 1.5)
+            soc = min(96.0, soc + 0.9 + rng.uniform(0, 0.15))
+
+        ocv_cell = ocv_from_soc(soc)
+        pack_voltage = ocv_cell * CELL_COUNT - current * 0.02 + rng.gauss(0, 0.3)
+        ambient = 25.0
+        joule_heat = 0.0009 * current * current
+
+        # Cell imbalance on cell 5: absent in cycle 1, appears in cycle 2,
+        # still present (mildly) at the very end of cycle 3 - deliberately
+        # not fully resolved, so the final row's real threshold check has
+        # something genuine to flag (see check_telemetry_thresholds).
+        imbalance_mv = 0.0
+        if cycle == 2:
+            imbalance_mv = 130 + 30 * math.sin(pos_in_cycle / 20)
+        elif cycle == 3:
+            imbalance_mv = 160 - 0.35 * pos_in_cycle  # slowly narrowing, never quite closes
+
+        # Thermal spike on cell 12: one clean event early in cycle 1, then
+        # normal for the rest of the file.
+        thermal_event = cycle == 1 and 40 <= pos_in_cycle <= 65
+
+        # GPS: only fixes while "driving" (discharging) - a short loop around
+        # the depot, drifting further out as the cycle progresses.
+        if discharging:
+            radius = 0.01 * (pos_in_cycle / max(1, int(rows_per_cycle * 0.65)))
+            angle = pos_in_cycle / 8
+            lat = base_lat + radius * math.sin(angle)
+            lng = base_lng + radius * math.cos(angle)
+        else:
+            lat = lng = None
+
+        row = {
+            "Timestamp": ts.isoformat(),
+            "Cycle_Number": cycle,
+            "Pack_Voltage": round(pack_voltage, 2),
+            "Pack_Current": round(current, 2),
+            "SOC": round(soc, 1),
+            "SOH": round(soh, 2),
+            "Capacity_Ah": round(capacity, 2),
+            "Latitude": round(lat, 6) if lat is not None else "",
+            "Longitude": round(lng, 6) if lng is not None else "",
+        }
+
+        for i in range(1, CELL_COUNT + 1):
+            bias = rng.uniform(-0.004, 0.004)
+            if i == imbalanced_cell and imbalance_mv > 0:
+                bias -= imbalance_mv / 1000.0
+            cell_v = ocv_cell + bias + rng.uniform(-0.002, 0.002)
+            row[f"Cell{i}_Voltage"] = round(cell_v, 3)
+
+            cell_t = ambient + joule_heat + rng.uniform(-0.6, 0.6)
+            if i == hot_cell and thermal_event:
+                progress = (pos_in_cycle - 40) / 25
+                cell_t += 20 * math.sin(min(1.0, max(0.0, progress)) * math.pi)
+            row[f"Cell{i}_Temp"] = round(cell_t, 1)
+
+        rows.append(row)
+
+    write_csv(os.path.join(OUT_DIR, filename), fieldnames, rows)
+
+
 if __name__ == "__main__":
     os.makedirs(OUT_DIR, exist_ok=True)
     gen_ev_pack("sample_ev_pack_healthy.csv", anomaly=False)
     gen_ev_pack("sample_ev_pack_anomaly.csv", anomaly=True)
     gen_lab_cycling("sample_lab_cycling_degradation.csv")
+    gen_full_demo_pack("sample_full_demo_pack.csv")

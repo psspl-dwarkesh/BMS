@@ -26,7 +26,7 @@ const CONNECTION_OPTIONS = [
 const emptyDevice = {
   serial_number: '', pack_name: '', manufacturer: '', chemistry: 'Li-ion',
   rated_voltage: '', rated_capacity_ah: '', cell_count: 16, thermistor_count: 4,
-  connection_type: 'SIMULATED', install_site: '',
+  connection_type: 'SIMULATED', install_site: '', home_latitude: '', home_longitude: '',
 };
 
 export default function DeviceManagement() {
@@ -46,6 +46,8 @@ export default function DeviceManagement() {
       rated_capacity_ah: device.rated_capacity_ah === '' ? null : parseFloat(device.rated_capacity_ah),
       cell_count: parseInt(device.cell_count, 10),
       thermistor_count: parseInt(device.thermistor_count, 10),
+      home_latitude: device.home_latitude === '' ? null : parseFloat(device.home_latitude),
+      home_longitude: device.home_longitude === '' ? null : parseFloat(device.home_longitude),
     }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['devices'] });
@@ -120,6 +122,14 @@ export default function DeviceManagement() {
             <div>
               <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.25rem' }}>Install Site</label>
               <input type="text" className="form-input" value={newDevice.install_site} onChange={e => setNewDevice({...newDevice, install_site: e.target.value})} placeholder="Warehouse A" />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.25rem' }}>Home Latitude</label>
+              <input type="number" step="0.000001" min="-90" max="90" className="form-input" value={newDevice.home_latitude} onChange={e => setNewDevice({...newDevice, home_latitude: e.target.value})} placeholder="e.g. 28.6139" />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.25rem' }}>Home Longitude</label>
+              <input type="number" step="0.000001" min="-180" max="180" className="form-input" value={newDevice.home_longitude} onChange={e => setNewDevice({...newDevice, home_longitude: e.target.value})} placeholder="e.g. 77.2090" />
             </div>
             <button type="submit" className="btn-primary" disabled={createMutation.isPending}>
               <Save size={16} />

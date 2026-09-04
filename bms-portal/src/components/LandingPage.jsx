@@ -1,6 +1,57 @@
 import { Activity, ArrowRight, CheckCircle2, XCircle, Database, TrendingUp, AlertTriangle, Shield, Cpu, Zap, BarChart3, Thermometer, FileText, Battery, ChevronRight, Upload, Eye, Sparkles } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
+// Live-looking battery pack: 8 cell bars pulsing at staggered offsets (as if
+// reporting real voltage), a moving current-trace line, and two status
+// dots - all CSS-driven (see .hero-cell-bar/.hero-trace-path/.hero-status-dot
+// keyframes in index.css), no chart library needed for a decorative visual.
+function HeroBatteryVisual() {
+  const cellHeights = [58, 74, 66, 80, 62, 70, 76, 64];
+  const barWidth = 26;
+  const gap = 12;
+  const chartLeft = 40;
+  const baseline = 190;
+  return (
+    <svg viewBox="0 0 480 240" width="100%" style={{ maxWidth: '460px', display: 'block', margin: '0 auto' }} role="img" aria-label="Animated battery pack telemetry visual">
+      <rect x="14" y="14" width="452" height="212" rx="18" fill="rgba(255,255,255,0.04)" stroke="rgba(255,255,255,0.14)" strokeWidth="1.5" />
+      <text x="34" y="42" fill="rgba(255,255,255,0.55)" fontSize="11" fontFamily="monospace" letterSpacing="0.05em">PACK-01 · 8S LI-ION</text>
+      <circle className="hero-status-dot" cx="424" cy="36" r="4" fill="#34d399" />
+      <text x="434" y="40" fill="#6ee7b7" fontSize="10" fontFamily="monospace">LIVE</text>
+
+      {cellHeights.map((h, i) => {
+        const x = chartLeft + i * (barWidth + gap);
+        const y = baseline - h;
+        const color = h < 65 ? '#fbbf24' : '#22d3ee';
+        return (
+          <g key={i}>
+            <rect x={x} y="60" width={barWidth} height={baseline - 60} rx="4" fill="rgba(255,255,255,0.05)" />
+            <rect
+              className="hero-cell-bar"
+              x={x} y={y} width={barWidth} height={h} rx="4"
+              fill={color}
+              opacity="0.9"
+              style={{ animationDelay: `${i * 0.18}s` }}
+            />
+          </g>
+        );
+      })}
+
+      <text x={chartLeft} y="203" fill="rgba(255,255,255,0.4)" fontSize="9" fontFamily="monospace">PACK CURRENT</text>
+
+      {/* Moving current-trace sparkline */}
+      <polyline
+        className="hero-trace-path"
+        points="40,220 80,217 110,221 150,214 190,219 230,213 270,218 310,212 350,217 390,211 440,216"
+        fill="none"
+        stroke="#34d399"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 export default function LandingPage() {
   const navigate = useNavigate();
   
@@ -43,14 +94,14 @@ export default function LandingPage() {
       </header>
 
       {/* Hero */}
-      <section className="landing-hero" style={{ background: 'linear-gradient(180deg, #ecfeff 0%, #f0f9ff 30%, var(--bg-secondary) 100%)' }}>
+      <section className="landing-hero">
         <div className="hero-content">
-          <div className="hero-tag" style={{ background: 'var(--accent-light)', color: 'var(--accent-primary)', border: '1px solid var(--accent-border)' }}>
+          <div className="hero-tag">
             <Battery size={14} />
             BMS BATTERY ANALYTICS PLATFORM
           </div>
           <h1 className="hero-title">
-            From raw BMS logs to<br />actionable battery insights.
+            From raw BMS logs to<br /><span className="hero-title-accent">actionable battery insights.</span>
           </h1>
           <p className="hero-subtitle">
             Enterprise-grade intelligence layer for battery fleets. Upload one or more BMS CSV logs, predict degradation, detect thermal anomalies, and optimize cell performance — all in one platform, with a full report generated automatically.
@@ -59,7 +110,7 @@ export default function LandingPage() {
             <button className="btn-primary" onClick={onEnter} style={{ padding: '0.85rem 2rem', fontSize: '1rem' }}>
               Launch Portal <ArrowRight size={18} />
             </button>
-            <button className="btn-secondary" onClick={onDocs} style={{ padding: '0.85rem 2rem', fontSize: '1rem' }}>
+            <button className="btn-secondary" onClick={onDocs} style={{ padding: '0.85rem 2rem', fontSize: '1rem', background: 'rgba(255,255,255,0.08)', borderColor: 'rgba(255,255,255,0.18)', color: '#fff' }}>
               <FileText size={18} /> View Documentation
             </button>
           </div>
@@ -67,16 +118,20 @@ export default function LandingPage() {
           {/* Animated KPI ticker */}
           <div style={{ display: 'flex', gap: '2rem', marginTop: '3rem', flexWrap: 'wrap', justifyContent: 'center' }}>
             {[
-              { label: 'Cells Monitored', value: '96+', color: 'var(--accent-primary)' },
-              { label: 'Data Points / Pack', value: '50k+', color: 'var(--success)' },
-              { label: 'Anomaly Types', value: '9+', color: 'var(--warning)' },
-              { label: 'Response Time', value: '<100ms', color: 'var(--info)' },
+              { label: 'Cells Monitored', value: '96+', color: '#22d3ee' },
+              { label: 'Data Points / Pack', value: '50k+', color: '#34d399' },
+              { label: 'Anomaly Types', value: '9+', color: '#fbbf24' },
+              { label: 'Response Time', value: '<100ms', color: '#38bdf8' },
             ].map((kpi, i) => (
               <div key={i} style={{ textAlign: 'center' }}>
                 <div style={{ fontFamily: "'Outfit', sans-serif", fontSize: '1.5rem', fontWeight: '700', color: kpi.color }}>{kpi.value}</div>
-                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: '500' }}>{kpi.label}</div>
+                <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.45)', fontWeight: '500' }}>{kpi.label}</div>
               </div>
             ))}
+          </div>
+
+          <div className="hero-battery-visual">
+            <HeroBatteryVisual />
           </div>
         </div>
       </section>

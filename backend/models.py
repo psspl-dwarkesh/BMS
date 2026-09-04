@@ -72,6 +72,12 @@ class AlertSeverity(str, enum.Enum):
     critical = "critical"
 
 
+class ImportStatus(str, enum.Enum):
+    processing = "processing"
+    completed  = "completed"
+    failed     = "failed"
+
+
 # ── Helper ────────────────────────────────────────────────────────────────────
 
 def _now() -> datetime.datetime:
@@ -122,6 +128,7 @@ class Device(Base):
     telemetry   = relationship("Telemetry",        back_populates="device", cascade="all, delete-orphan")
     assignments = relationship("DeviceAssignment", back_populates="device", cascade="all, delete-orphan")
     alerts      = relationship("Alert",            back_populates="device", cascade="all, delete-orphan")
+    imports     = relationship("TelemetryImport",  back_populates="device", cascade="all, delete-orphan")
 
 
 class DeviceAssignment(Base):
@@ -139,6 +146,36 @@ class DeviceAssignment(Base):
     user    = relationship("User",   foreign_keys=[user_id], back_populates="assignments")
 
 
+class TelemetryImport(Base):
+    """
+    One row per CSV file imported into a device (source=csv_import telemetry
+    rows are tagged with the batch that created them via Telemetry.import_id).
+
+    This is the audit trail the "Upload History" panel reads: which file,
+    when, by whom, how many rows, and whether it's currently toggled into the
+    device's analytics (`included`). Deleting a batch cascades to its
+    Telemetry rows (and their CellReadings, via Telemetry's own cascade) so
+    "delete this CSV" genuinely removes the data it contributed.
+    """
+    __tablename__ = "telemetry_imports"
+
+    id                  = Column(Integer, primary_key=True, index=True)
+    device_id           = Column(Integer, ForeignKey("devices.id", ondelete="CASCADE"), nullable=False, index=True)
+    filename            = Column(String(255), nullable=False)
+    uploaded_at         = Column(DateTime, default=_now, nullable=False)
+    uploaded_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    row_count           = Column(Integer, default=0, nullable=False)
+    rows_skipped        = Column(Integer, default=0, nullable=False)
+    status              = Column(Enum(ImportStatus), nullable=False, default=ImportStatus.processing)
+    # Toggles whether this batch's Telemetry rows are included in the
+    # device's latest/history/location-history queries and therefore every
+    # analytics tab downstream of them - a soft "hide without deleting".
+    included            = Column(Boolean, default=True, nullable=False)
+
+    device        = relationship("Device", back_populates="imports")
+    telemetry_rows = relationship("Telemetry", back_populates="import_batch")
+
+
 class Telemetry(Base):
     """One pack-level snapshot.  Per-cell detail lives in CellReading."""
     __tablename__ = "telemetry"
@@ -152,6 +189,11 @@ class Telemetry(Base):
     sample_time = Column(DateTime, nullable=False)
     ingested_at = Column(DateTime, default=_now, nullable=False)
     source      = Column(Enum(TelemetrySource), nullable=False, default=TelemetrySource.simulator)
+    # Only set for source=csv_import rows - which CSV upload created this row.
+    # CASCADE (not SET NULL): "delete this CSV" in the Upload History panel is
+    # meant to actually remove the data it contributed, not just the audit
+    # record - same intent as Device's cascade to its own Telemetry rows.
+    import_id   = Column(Integer, ForeignKey("telemetry_imports.id", ondelete="CASCADE"), nullable=True, index=True)
 
     # ── Pack-level measurements ───────────────────────────────────────────────
     pack_voltage     = Column(Float, nullable=True)   # V
@@ -178,9 +220,18 @@ class Telemetry(Base):
     latitude  = Column(Float, nullable=True)
     longitude = Column(Float, nullable=True)
 
+    # ── Lab-cycling / degradation-trend fields ──────────────────────────────────
+    # A CSV with Cycle_Number/Capacity_Ah columns (e.g. a lab cycling-test
+    # log) used to have both silently dropped on import despite
+    # DataIngestion.jsx's own "Expected CSV Format" note advertising support
+    # for them - nothing in the schema had anywhere to put them.
+    cycle_number = Column(Integer, nullable=True)
+    capacity_ah  = Column(Float,   nullable=True)
+
     device      = relationship("Device",      back_populates="telemetry")
     cell_readings = relationship("CellReading", back_populates="telemetry", cascade="all, delete-orphan")
     alerts      = relationship("Alert",       back_populates="telemetry")
+    import_batch = relationship("TelemetryImport", back_populates="telemetry_rows")
 
 
 class CellReading(Base):

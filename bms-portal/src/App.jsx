@@ -1,4 +1,4 @@
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import { AuthProvider, useAuth } from './context/AuthContext';
@@ -10,6 +10,7 @@ import Documentation from './components/Documentation';
 
 // Pages to be created in subsequent phases
 import FleetDashboard from './components/FleetDashboard';
+import FleetMap from './components/FleetMap';
 import DeviceRealtime from './components/DeviceRealtime';
 import DeviceHistory from './components/DeviceHistory';
 import AlertsPage from './components/AlertsPage';
@@ -68,6 +69,16 @@ function RequireAuth({ children, adminOnly = false }) {
   return children;
 }
 
+// Route wrapper: Documentation's back button calls an `onBack` prop, but the
+// route element itself has no navigate() of its own to hand it - a plain
+// `<Route element={<Documentation />} />` left onBack undefined and the
+// button did nothing. This small wrapper is the component that actually
+// owns the hook call.
+function DocumentationRoute() {
+  const navigate = useNavigate();
+  return <Documentation onBack={() => navigate('/')} />;
+}
+
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
@@ -76,7 +87,7 @@ function App() {
           <Routes>
             <Route path="/" element={<LandingPage />} />
             <Route path="/login" element={<LoginPage />} />
-            <Route path="/docs" element={<Documentation />} />
+            <Route path="/docs" element={<DocumentationRoute />} />
             
             <Route path="/app" element={
               <RequireAuth>
@@ -89,6 +100,7 @@ function App() {
                   <FleetDashboard />
                 </RequireAuth>
               } />
+              <Route path="fleet/map" element={<RequireAuth adminOnly><FleetMap /></RequireAuth>} />
               <Route path="fleet/users" element={<RequireAuth adminOnly><UserManagement /></RequireAuth>} />
               <Route path="fleet/devices" element={<RequireAuth adminOnly><DeviceManagement /></RequireAuth>} />
               <Route path="fleet/alerts" element={<RequireAuth adminOnly><AlertsPage /></RequireAuth>} />
