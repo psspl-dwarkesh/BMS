@@ -1,55 +1,54 @@
-# BMS Portal — Project Roadmap & Architecture Structure
+# BMS Portal — Project Roadmap
 
-## Current Architecture Implemented
-- **Frontend Stack**: React 19, Vite, Lucide React, Recharts
-- **Theme**: Professional BMS Teal/Cyan Enterprise Theme
-- **Data Flow**: PapaParse for client-side CSV processing, full React state management
-- **Core Views**:
-  - Landing Page (Marketing & Platform Capabilities)
-  - Login Page (Role-Based Access Control demo)
-  - Dashboard (KPIs, Charts, SVG Gauges)
-  - Cell Analysis (96-cell Heatmap & Bar Charts)
-  - Degradation & Thermal Analysis
-  - Alerts & Anomalies Table
-  - Data Ingestion Wizard
-  - Report Generator (PDF mock export)
-- **Interactive UI**: Working Modals (Settings), Dropdowns (Profile, Notifications), SVG Gauges
+> For a detailed, feature-by-feature snapshot of what's actually built vs. known gaps, see
+> [current-status.md](current-status.md) — this file just tracks the phase-level plan.
+
+## Phase 1: Frontend Finalization — ✅ Done
+- [x] Teal/Cyan enterprise color palette
+- [x] Real login with Role-Based Access Control (Admin, User)
+- [x] Bundled sample datasets for a zero-setup first upload
+- [x] Interactive dropdowns, settings modal, SVG gauges, PDF/CSV report export
+
+## Phase 2: Backend Integration & Server-Side Analytics — ✅ Done
+- [x] Real FastAPI + SQLAlchemy backend (SQLite) — devices, telemetry, cell readings, alerts,
+  users, all persisted and served over REST
+- [x] CSV import runs server-side (batched inserts, background task) via
+  `POST /devices/{id}/telemetry/import`
+- [x] REST endpoints for fetching processed/historical time-series data
+  (`/telemetry/latest`, `/telemetry/history`, `/telemetry/{id}/cells`)
+- [ ] Move the client-side analytics math itself (KPIs, anomaly detection, EKF SOH estimation —
+  currently `utils/csvParser.js`, run in the browser) to the server — still a client-side engine
+  today, just now fed by backend data instead of only a raw upload
+
+## Phase 3: Machine Learning & Predictive SOH — Partially done
+- [x] Trained RandomForestRegressor for SOH/RUL (`POST /devices/{id}/predict/rul`), trained on the
+  real NASA Li-ion discharge dataset — replaces the earlier untrained-model placeholder
+- [ ] Wire that endpoint into an actual UI tab (it exists and works, nothing calls it yet)
+- [x] Multi-cycle degradation curves (Degradation tab, EKF-derived when the source lacks a real
+  SOH/Capacity signal, labeled measured vs. estimated)
+- [ ] Track historical SOH across re-imports of the same device over time (currently each
+  device's degradation view is computed from its own telemetry history, not compared release-over-release)
+
+## Phase 4: Fleet Management & Scale — Mostly done
+- [x] Fleet Dashboard backed by real device records (was 256 `Math.random()` packs; now the real
+  `/devices` list, role-scoped)
+- [x] Geographic mapping (Location tab, GPS trace from telemetry rows with lat/lng)
+- [x] Real-time telemetry via WebSocket (`WS /ws/alerts` + an optional per-device simulator,
+  `SIMULATOR_ENABLED`, off by default for this upload-and-analyze demo) — bypasses manual CSV
+  upload when turned on
+- [x] Real JWT authentication (bcrypt-hashed passwords, backend-issued/verified tokens) — no
+  hardcoded frontend credentials; SSO is not implemented
+
+## What's next
+See [current-status.md](current-status.md#-in-progress--known-gaps) for the live list — currently:
+wiring the RUL endpoint into the UI, WebSocket reconnect logic, real pagination for
+alerts/location/analytics history (today they're capped, not paginated), and moving large-CSV
+client-side parsing off the main thread.
 
 ---
 
-## Phase 1: Frontend Finalization (Current)
-- [x] Complete UI redesign to Teal/Cyan enterprise color palette.
-- [x] Implement Login page with Role-Based Access Control mock (Admin, Engineer, Viewer).
-- [x] Add auto-loading sample datasets for seamless first-time user experience.
-- [x] Implement interactive dropdowns (Profile, Notifications).
-- [x] Implement Settings Modal for configuration.
-- [x] Implement Report Generator (Mock PDF generation).
-- [x] Convert SOC indicator to custom animated SVG Gauge.
-- [ ] Connect Settings state to actual UI behavior (e.g. changing alert sensitivity updates anomalies array).
-
-## Phase 2: Backend Integration & Server-Side Analytics
-- [ ] Migrate CSV parsing from client-side (`PapaParse`) to server-side (`Pandas`).
-- [ ] Create Python-based calculation engine for thermal anomaly detection.
-- [ ] Create Python-based calculation engine for voltage imbalance spread.
-- [ ] Implement database persistence (`SQLite`/`PostgreSQL`) for uploaded logs and generated reports.
-- [ ] Build REST API endpoints for fetching processed time-series data.
-
-## Phase 3: Machine Learning & Predictive SOH
-- [ ] Integrate ML models to replace mock `estimatedSOH`.
-- [ ] Implement multi-cycle degradation curves.
-- [ ] Implement Remaining Useful Life (RUL) predictive modeling.
-- [ ] Store historical SOH data to track capacity fade over time.
-
-## Phase 4: Fleet Management & Scale
-- [ ] Introduce "Fleet Dashboard" to monitor multiple battery packs simultaneously.
-- [ ] Build geographic mapping for deployed fleet vehicles.
-- [ ] Implement real-time WebSocket telemetry ingestion (bypassing manual CSV upload).
-- [ ] Implement robust user authentication via JWT tokens and backend SSO integration.
-
----
-
-## New Page Ideas for Future Development
-1. **Fleet Map**: A map view showing live locations and health statuses of multiple battery packs.
-2. **Firmware OTA Manager**: Interface to push Over-The-Air updates to BMS hardware.
-3. **Advanced Calibration**: A page for engineers to manually adjust voltage curves and calibration metrics based on lab test data.
-4. **Audit Logs**: Security page tracking which users accessed which datasets or downloaded which reports.
+## Ideas parked for later (not scheduled)
+1. **Firmware OTA Manager** — interface to push over-the-air updates to BMS hardware.
+2. **Advanced Calibration** — a page for engineers to manually adjust voltage curves/calibration
+   metrics against lab test data.
+3. **Audit Logs** — track which users accessed which devices or downloaded which reports.
